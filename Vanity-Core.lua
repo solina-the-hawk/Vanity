@@ -72,6 +72,23 @@ function Vanity.useDescription(name)
     end
 end
 
+function Vanity.showDescription(name)
+    name = name:lower()
+    local c = Vanity.config.colors
+    
+    if Vanity.descriptions[name] then
+        cecho(string.format("\n%s=======================================================================<reset>", c.border))
+        cecho(string.format("\n%s                   V A N I T Y : %s%s<reset>", c.border, c.highlight, name:upper()))
+        cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
+        
+        cecho(string.format("%s%s<reset>\n", c.text, Vanity.descriptions[name]))
+        
+        cecho(string.format("%s=======================================================================<reset>\n", c.border))
+    else
+        Vanity.echo(string.format("%sDescription '%s' not found.<reset>", c.error, name))
+    end
+end
+
 function Vanity.listDescriptions()
     local c = Vanity.config.colors
     cecho(string.format("\n%s=======================================================================<reset>", c.border))
@@ -118,7 +135,8 @@ function Vanity.showHelp()
     cecho(string.format("\n%sIn-Game Commands:<reset>", c.prefix))
     cecho(string.format("\n  %svanity update <name> <content><reset>  - Creates or overwrites a description.", c.highlight))
     cecho(string.format("\n  %svanity use <name><reset>               - Sends DESCRIBE SELF <content> to the MUD.", c.highlight))
-    cecho(string.format("\n  %svanity list<reset>                     - Displays all saved descriptions.", c.highlight))
+    cecho(string.format("\n  %svanity show <name><reset>              - Displays the full text of a saved description.", c.highlight))
+    cecho(string.format("\n  %svanity list<reset>                     - Displays a quick preview of all descriptions.", c.highlight))
     cecho(string.format("\n  %svanity delete <name><reset>            - Removes a saved description.", c.highlight))
     cecho(string.format("\n  %svanity help<reset>                     - Shows this help menu.", c.highlight))
     
@@ -136,12 +154,15 @@ function Vanity.handleCommand(args)
         -- Regex parsing for multi-word commands
         local updateName, updateContent = string.match(args, "^[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+(.+)$")
         local useName = string.match(args, "^[Uu][Ss][Ee]%s+(%w+)$")
+        local showName = string.match(args, "^[Ss][Hh][Oo][Ww]%s+(%w+)$")
         local deleteName = string.match(args, "^[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)$")
         
         if updateName and updateContent then
             Vanity.updateDescription(updateName, updateContent)
         elseif useName then
             Vanity.useDescription(useName)
+        elseif showName then
+            Vanity.showDescription(showName)
         elseif deleteName then
             Vanity.deleteDescription(deleteName)
         else
@@ -165,7 +186,7 @@ function Vanity.init()
     ]])
 
     Vanity.load()
-    Vanity.echo("Vanity Manager Initialized. Type " .. Vanity.config.colors.highlight .. "vanity help<reset> for commands.")
+    Vanity.echo("Manager Initialized. Type " .. Vanity.config.colors.highlight .. "vanity help<reset> for commands.")
 end
 
 -- Boot the script
