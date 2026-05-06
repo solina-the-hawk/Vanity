@@ -110,6 +110,23 @@ function Vanity.listDescriptions()
     cecho(string.format("%s=======================================================================<reset>\n", c.border))
 end
 
+function Vanity.editDescription(name)
+    name = name:lower()
+    local c = Vanity.config.colors
+    
+    if Vanity.descriptions[name] then
+        -- Clear whatever you were typing
+        clearCmdLine()
+        
+        -- Inject the update command + the existing description
+        appendCmdLine("vanity update " .. name .. " " .. Vanity.descriptions[name])
+        
+        Vanity.echo(string.format("%sDescription '%s%s%s' loaded into your command line. Edit it and press Enter to save!<reset>", c.text, c.highlight, name, c.text))
+    else
+        Vanity.echo(string.format("%sDescription '%s' not found.<reset>", c.error, name))
+    end
+end
+
 function Vanity.deleteDescription(name)
     name = name:lower()
     local c = Vanity.config.colors
@@ -137,6 +154,7 @@ function Vanity.showHelp()
     cecho(string.format("\n  %svanity use <name><reset>               - Sends DESCRIBE SELF <content> to the MUD.", c.highlight))
     cecho(string.format("\n  %svanity show <name><reset>              - Displays the full text of a saved description.", c.highlight))
     cecho(string.format("\n  %svanity list<reset>                     - Displays a quick preview of all descriptions.", c.highlight))
+    cecho(string.format("\n  %svanity edit <name><reset>              - Loads a saved description into the input line to edit.", c.highlight))
     cecho(string.format("\n  %svanity delete <name><reset>            - Removes a saved description.", c.highlight))
     cecho(string.format("\n  %svanity help<reset>                     - Shows this help menu.", c.highlight))
     
@@ -156,6 +174,7 @@ function Vanity.handleCommand(args)
         local useName = string.match(args, "^[Uu][Ss][Ee]%s+(%w+)$")
         local showName = string.match(args, "^[Ss][Hh][Oo][Ww]%s+(%w+)$")
         local deleteName = string.match(args, "^[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)$")
+        local editName = string.match(args, "^[Ee][Dd][Ii][Tt]%s+(%w+)$")
         
         if updateName and updateContent then
             Vanity.updateDescription(updateName, updateContent)
@@ -163,6 +182,8 @@ function Vanity.handleCommand(args)
             Vanity.useDescription(useName)
         elseif showName then
             Vanity.showDescription(showName)
+        elseif editName then
+            Vanity.editDescription(editName)
         elseif deleteName then
             Vanity.deleteDescription(deleteName)
         else
