@@ -63,7 +63,6 @@ function Vanity.load()
         Vanity.descriptions = data.descriptions or {}
         Vanity.components = data.components or {}
     elseif io.exists(oldFile) then
-        -- Seamless migration from the MVP version
         table.load(oldFile, Vanity.descriptions)
         Vanity.components = {}
         Vanity.save() 
@@ -79,17 +78,14 @@ function Vanity.checkStyle(text)
     local t = text:lower()
     local warnings = {}
     
-    -- Check for clothing/items
     if t:match("wearing") or t:match("dressed in") or t:match("clothes") or t:match("cloak") or t:match("wielding") or t:match("holding") then
         table.insert(warnings, "Clothing/Items: The game automatically shows your inventory and worn items. Adding clothes here may contradict your actual gear.")
     end
     
-    -- Check for redundant race/gender mentions
     if t:match(" is a human") or t:match(" is a dwarf") or t:match(" male ") or t:match(" female ") then
         table.insert(warnings, "Race/Gender: Achaea automatically prepends your race and gender. You don't need to repeat it.")
     end
     
-    -- Check for godmoding emotions
     if t:match("makes you feel") or t:match("you can't help but") or t:match("intimidating you") then
         table.insert(warnings, "Godmoding: Remember to describe only what people *see*, rather than telling them how to feel or react.")
     end
@@ -151,19 +147,27 @@ end
 
 function Vanity.combineComponents(saveName)
     local c = Vanity.config.colors
-    local h = Vanity.components["HEIGHT"] or "an average height"
-    local b = Vanity.components["BUILD"] or "an average build"
-    local comp = Vanity.components["COMPLEXION"] or "a fair"
-    local e = Vanity.components["EYES"] or "unremarkable"
-    local hr = Vanity.components["HAIR"] or "plain hair"
+    local order = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
+    local parts = {}
     
-    -- Constructing a grammatically neutral sentence since we don't know the character's pronouns.
-    local combined = string.format("A figure of %s and %s, characterized by %s complexion, %s eyes, and %s.", h, b, comp, e, hr)
+    -- Gather all saved components sequentially
+    for _, comp in ipairs(order) do
+        if Vanity.components[comp] and Vanity.components[comp] ~= "" then
+            table.insert(parts, Vanity.components[comp])
+        end
+    end
+    
+    -- Combine them with a single space
+    local combined = table.concat(parts, " ")
+    
+    if combined == "" then
+        Vanity.echo(string.format("%sYou have not set any components to combine yet!<reset>", c.error))
+        return
+    end
     
     Vanity.echo(string.format("%sExperimental Combined Description:<reset>", c.highlight))
     cecho(string.format("%s%s<reset>\n", c.text, combined))
     
-    -- Soft-check the resulting string against the style guide just in case
     Vanity.checkStyle(combined)
     
     if saveName and saveName ~= "" then
