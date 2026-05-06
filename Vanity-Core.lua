@@ -274,8 +274,41 @@ function Vanity.editDescription(name)
 end
 
 -- =========================================================================
--- In-Game Commands & Help Interface
+-- In-Game Commands, Dashboard & Help Interface
 -- =========================================================================
+function Vanity.showDashboard()
+    local c = Vanity.config.colors
+    cecho(string.format("\n%s=======================================================================<reset>", c.border))
+    cecho(string.format("\n%s                     V A N I T Y   D A S H B O A R D                   <reset>", c.border))
+    cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
+    
+    cecho(string.format("\n%sCurrent Components:<reset>\n", c.prefix))
+    local comps = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
+    for _, k in ipairs(comps) do
+        local val = Vanity.components[k] or "Not set"
+        cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, k, c.text, val))
+    end
+
+    cecho(string.format("\n%sSaved Descriptions:<reset>\n", c.prefix))
+    local count = 0
+    for name, content in pairs(Vanity.descriptions) do
+        local preview = string.sub(content, 1, 55)
+        if string.len(content) > 55 then preview = preview .. "..." end
+        cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, name, c.text, preview))
+        count = count + 1
+    end
+    if count == 0 then
+        cecho(string.format("  %sNo descriptions saved yet.<reset>\n", c.text))
+    end
+    
+    cecho(string.format("\n%sQuick Syntax Guide:<reset>\n", c.prefix))
+    cecho(string.format("  %svanity update <name> <text><reset>      - Save a main description.\n", c.highlight))
+    cecho(string.format("  %svanity comp update <type> <text><reset> - Save a component.\n", c.highlight))
+    cecho(string.format("  %svanity help<reset>                      - View the full list of commands.\n", c.warning))
+
+    cecho(string.format("%s=======================================================================<reset>\n", c.border))
+end
+
 function Vanity.showHelp()
     local c = Vanity.config.colors
     cecho(string.format("\n%s=======================================================================<reset>", c.border))
@@ -302,7 +335,9 @@ end
 function Vanity.handleCommand(args)
     local cmd = args:lower()
     
-    if cmd == "help" or cmd == "" then
+    if cmd == "" then
+        Vanity.showDashboard()
+    elseif cmd == "help" then
         Vanity.showHelp()
     elseif cmd == "list" then
         Vanity.listDescriptions()
@@ -349,12 +384,12 @@ function Vanity.init()
     if Vanity.aliasHandler then killAlias(Vanity.aliasHandler) end
     
     Vanity.aliasHandler = tempAlias("^vanity(?: (.*))?$", [[
-        local args = matches[2] or "help"
+        local args = matches[2] or ""
         Vanity.handleCommand(args)
     ]])
 
     Vanity.load()
-    Vanity.echo("Manager Initialized. Type " .. Vanity.config.colors.highlight .. "vanity help<reset> for commands.")
+    Vanity.echo("Manager Initialized. Type " .. Vanity.config.colors.highlight .. "vanity<reset> to view your dashboard.")
 end
 
 Vanity.init()
