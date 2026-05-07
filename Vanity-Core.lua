@@ -19,12 +19,14 @@ Vanity.config = {
     },
     limits = {
         main = 2034,
-        component = 75
-    }
+        element = 75
+    },
+    -- Set to false if you want to see Achaea's "This is what your description looks like now" text
+    gagGameEcho = true 
 }
 
 Vanity.descriptions = Vanity.descriptions or {}
-Vanity.components = Vanity.components or {}
+Vanity.elements = Vanity.elements or {}
 
 -- =========================================================================
 -- Standardized Output Helper
@@ -45,7 +47,7 @@ function Vanity.save()
     
     local data = {
         descriptions = Vanity.descriptions,
-        components = Vanity.components
+        elements = Vanity.elements
     }
     
     local filepath = baseDir .. "/Vanity_Data.lua"
@@ -55,20 +57,50 @@ end
 function Vanity.load()
     local baseDir = getMudletHomeDir() .. "/Vanity"
     local newFile = baseDir .. "/Vanity_Data.lua"
-    local oldFile = baseDir .. "/Vanity_Descriptions.lua"
     
     if io.exists(newFile) then
         local data = {}
         table.load(newFile, data)
         Vanity.descriptions = data.descriptions or {}
-        Vanity.components = data.components or {}
-    elseif io.exists(oldFile) then
-        table.load(oldFile, Vanity.descriptions)
-        Vanity.components = {}
-        Vanity.save() 
-        os.remove(oldFile)
-        Vanity.echo("Migrated your old descriptions to the new data format.")
+        Vanity.elements = data.elements or data.components or {} -- Catch old 'components' if they exist
+        
+        -- Migrate old string-only descriptions to the new {name, content} table format
+        local migrated = false
+        for k, v in pairs(Vanity.descriptions) do
+            if type(v) == "string" then
+                Vanity.descriptions[k] = {
+                    name = k:gsub("^%l", string.upper), -- Capitalize the keyword for a default name
+                    content = v
+                }
+                migrated = true
+            end
+        end
+        if migrated then 
+            Vanity.save() 
+            Vanity.echo("Migrated older descriptions to the new Keyword/Name format.")
+        end
     end
+end
+
+-- =========================================================================
+-- Utility: Gag Game Echoes
+-- =========================================================================
+function Vanity.gagEcho()
+    if not Vanity.config.gagGameEcho then return end
+    
+    -- Catch the standard Achaea description echo and the line immediately following it
+    if Vanity.gagTrig then killTrigger(Vanity.gagTrig) end
+    Vanity.gagTrig = tempRegexTrigger("^This is what your description looks like now\\.$", function()
+        deleteLine()
+        if Vanity.gagDescTrig then killTrigger(Vanity.gagDescTrig) end
+        Vanity.gagDescTrig = tempRegexTrigger("^.*$", function()
+            deleteLine()
+        end, 1)
+        tempTimer(0.3, function() if Vanity.gagDescTrig then killTrigger(Vanity.gagDescTrig) end end)
+    end, 1)
+    
+    -- Cleanup the initial trigger if it doesn't fire within 1 second
+    tempTimer(1, function() if Vanity.gagTrig then killTrigger(Vanity.gagTrig) end end)
 end
 
 -- =========================================================================
@@ -100,68 +132,71 @@ function Vanity.checkStyle(text)
 end
 
 -- =========================================================================
--- Component Features
+-- Element Features (Formerly Components)
 -- =========================================================================
-function Vanity.updateComponent(compType, text)
-    compType = compType:upper()
+function Vanity.updateElement(elemType, text)
+    elemType = elemType:upper()
     local c = Vanity.config.colors
     local validTypes = {HAIR=true, BALD=true, EYES=true, COMPLEXION=true, HEIGHT=true, BUILD=true}
     
-    if not validTypes[compType] then
-        Vanity.echo(string.format("%sInvalid component. Use HAIR, BALD, EYES, COMPLEXION, HEIGHT, or BUILD.<reset>", c.error))
+    if not validTypes[elemType] then
+        Vanity.echo(string.format("%sInvalid element. Use HAIR, BALD, EYES, COMPLEXION, HEIGHT, or BUILD.<reset>", c.error))
         return
     end
     
-    if compType == "BALD" then
-        Vanity.components["HAIR"] = "bald"
+    if elemType == "BALD" then
+        Vanity.elements["HAIR"] = "bald"
         Vanity.save()
+        Vanity.gagEcho()
         send("DESCRIBE SELF BALD")
-        Vanity.echo(string.format("%sComponent %sHAIR%s set to %sBALD%s and sent to Achaea.<reset>", c.text, c.highlight, c.text, c.highlight, c.text))
+        Vanity.echo(string.format("%sElement %sHair%s set to %sBald%s and sent to Achaea.<reset>", c.text, c.highlight, c.text, c.highlight, c.text))
         return
     end
     
-    if text:len() > Vanity.config.limits.component then
-        Vanity.echo(string.format("%sComponent text is too long! Max %d characters. You entered %d.<reset>", c.error, Vanity.config.limits.component, text:len()))
+    if text:len() > Vanity.config.limits.element then
+        Vanity.echo(string.format("%sElement text is too long! Max %d characters. You entered %d.<reset>", c.error, Vanity.config.limits.element, text:len()))
         return
     end
     
-    Vanity.components[compType] = text
+    Vanity.elements[elemType] = text
     Vanity.save()
-    send("DESCRIBE SELF " .. compType .. " " .. text)
-    Vanity.echo(string.format("%sComponent %s%s%s updated and sent to Achaea.<reset>", c.text, c.highlight, compType, c.text))
+    Vanity.gagEcho()
+    send("DESCRIBE SELF " .. elemType .. " " .. text)
+    
+    local niceName = elemType:lower():gsub("^%l", string.upper)
+    Vanity.echo(string.format("%sElement %s%s%s updated and sent to Achaea.<reset>", c.text, c.highlight, niceName, c.text))
 end
 
-function Vanity.listComponents()
+function Vanity.listElements()
     local c = Vanity.config.colors
     cecho(string.format("\n%s=======================================================================<reset>", c.border))
-    cecho(string.format("\n%s                        C O M P O N E N T S                            <reset>", c.border))
+    cecho(string.format("\n%s                          E L E M E N T S                              <reset>", c.border))
     cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
     
-    local comps = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
-    for _, k in ipairs(comps) do
-        local val = Vanity.components[k] or "Not set"
-        cecho(string.format("%s%-15s<reset> : %s%s<reset>\n", c.highlight, k, c.text, val))
+    local elems = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
+    for _, k in ipairs(elems) do
+        local val = Vanity.elements[k] or "Not set"
+        local niceName = k:lower():gsub("^%l", string.upper)
+        cecho(string.format("%s%-15s<reset> : %s%s<reset>\n", c.highlight, niceName, c.text, val))
     end
     cecho(string.format("%s=======================================================================<reset>\n", c.border))
 end
 
-function Vanity.combineComponents(saveName)
+function Vanity.combineElements(saveKey, saveName)
     local c = Vanity.config.colors
     local order = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
     local parts = {}
     
-    -- Gather all saved components sequentially
-    for _, comp in ipairs(order) do
-        if Vanity.components[comp] and Vanity.components[comp] ~= "" then
-            table.insert(parts, Vanity.components[comp])
+    for _, elem in ipairs(order) do
+        if Vanity.elements[elem] and Vanity.elements[elem] ~= "" then
+            table.insert(parts, Vanity.elements[elem])
         end
     end
     
-    -- Combine them with a single space
     local combined = table.concat(parts, " ")
     
     if combined == "" then
-        Vanity.echo(string.format("%sYou have not set any components to combine yet!<reset>", c.error))
+        Vanity.echo(string.format("%sYou have not set any elements to combine yet!<reset>", c.error))
         return
     end
     
@@ -170,18 +205,43 @@ function Vanity.combineComponents(saveName)
     
     Vanity.checkStyle(combined)
     
-    if saveName and saveName ~= "" then
-        Vanity.updateDescription(saveName, combined)
+    if saveKey and saveName then
+        Vanity.addDescription(saveKey, saveName, combined)
     else
-        cecho(string.format("\n%s(Tip: Use '%svanity comp combine <name>%s' to automatically save this to your list.)<reset>\n", c.warning, c.highlight, c.warning))
+        cecho(string.format("\n%s(Tip: Use '%svanity elem combine <keyword> \"<Name>\"%s' to automatically save this.)<reset>\n", c.warning, c.highlight, c.warning))
     end
 end
 
 -- =========================================================================
 -- Main Description Features
 -- =========================================================================
-function Vanity.updateDescription(name, content)
-    name = name:lower()
+function Vanity.addDescription(keyword, name, content)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    
+    if Vanity.descriptions[keyword] then
+        Vanity.echo(string.format("%sKeyword '%s' already exists! Use %svanity update%s instead.<reset>", c.error, keyword, c.highlight, c.error))
+        return
+    end
+    
+    Vanity.performSaveLogic(keyword, name, content, "added")
+end
+
+function Vanity.updateDescription(keyword, name, content)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    
+    if not Vanity.descriptions[keyword] then
+        Vanity.echo(string.format("%sKeyword '%s' not found! Use %svanity add%s to create a new one.<reset>", c.error, keyword, c.highlight, c.error))
+        return
+    end
+    
+    -- If no new name is provided, keep the old one
+    name = name or Vanity.descriptions[keyword].name
+    Vanity.performSaveLogic(keyword, name, content, "updated")
+end
+
+function Vanity.performSaveLogic(keyword, name, content, actionWord)
     local c = Vanity.config.colors
     local length = content:len()
     local max = Vanity.config.limits.main
@@ -195,35 +255,91 @@ function Vanity.updateDescription(name, content)
     
     Vanity.checkStyle(content)
     
-    Vanity.descriptions[name] = content
+    Vanity.descriptions[keyword] = { name = name, content = content }
     Vanity.save()
-    Vanity.echo(string.format("%sDescription '%s%s%s' has been saved.<reset>", c.text, c.highlight, name, c.text))
+    Vanity.echo(string.format("%sDescription [%s%s%s] '%s%s%s' has been %s.<reset>", c.text, c.highlight, keyword, c.text, c.highlight, name, c.text, actionWord))
 end
 
-function Vanity.useDescription(name)
-    name = name:lower()
+function Vanity.copyDescription(oldKey, newKey, newName)
+    oldKey = oldKey:lower()
+    newKey = newKey:lower()
     local c = Vanity.config.colors
     
-    if Vanity.descriptions[name] then
-        send("DESCRIBE SELF " .. Vanity.descriptions[name])
-        Vanity.echo(string.format("%sApplied description '%s%s%s'.<reset>", c.text, c.highlight, name, c.text))
+    if not Vanity.descriptions[oldKey] then
+        Vanity.echo(string.format("%sSource keyword '%s' not found.<reset>", c.error, oldKey))
+        return
+    end
+    if Vanity.descriptions[newKey] then
+        Vanity.echo(string.format("%sDestination keyword '%s' already exists! Pick a new keyword.<reset>", c.error, newKey))
+        return
+    end
+    
+    local content = Vanity.descriptions[oldKey].content
+    Vanity.descriptions[newKey] = { name = newName, content = content }
+    Vanity.save()
+    Vanity.echo(string.format("%sCopied [%s] to new description [%s%s%s] '%s%s%s'.<reset>", c.text, oldKey, c.highlight, newKey, c.text, c.highlight, newName, c.text))
+end
+
+function Vanity.deleteDescription(keyword, confirmText)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    
+    if not Vanity.descriptions[keyword] then
+        Vanity.echo(string.format("%sKeyword '%s' not found.<reset>", c.error, keyword))
+        return
+    end
+    
+    if confirmText ~= "CONFIRM" then
+        Vanity.echo(string.format("%sTo delete this description, you must type: %svanity delete %s CONFIRM<reset>", c.warning, c.highlight, keyword))
+        return
+    end
+    
+    local name = Vanity.descriptions[keyword].name
+    Vanity.descriptions[keyword] = nil
+    Vanity.save()
+    Vanity.echo(string.format("%sDescription [%s%s%s] '%s%s%s' deleted.<reset>", c.text, c.highlight, keyword, c.text, c.highlight, name, c.text))
+end
+
+function Vanity.useDescription(keyword)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    
+    if Vanity.descriptions[keyword] then
+        Vanity.gagEcho()
+        send("DESCRIBE SELF " .. Vanity.descriptions[keyword].content)
+        Vanity.echo(string.format("%sApplied description '%s%s%s'.<reset>", c.text, c.highlight, Vanity.descriptions[keyword].name, c.text))
     else
-        Vanity.echo(string.format("%sDescription '%s' not found.<reset>", c.error, name))
+        Vanity.echo(string.format("%sKeyword '%s' not found.<reset>", c.error, keyword))
     end
 end
 
-function Vanity.showDescription(name)
-    name = name:lower()
+function Vanity.showDescription(keyword)
+    keyword = keyword:lower()
     local c = Vanity.config.colors
     
-    if Vanity.descriptions[name] then
+    if Vanity.descriptions[keyword] then
+        local data = Vanity.descriptions[keyword]
         cecho(string.format("\n%s=======================================================================<reset>", c.border))
-        cecho(string.format("\n%s                   V A N I T Y : %s%s<reset>", c.border, c.highlight, name:upper()))
+        cecho(string.format("\n%s                 V A N I T Y : %s%s %s(%s)<reset>", c.border, c.highlight, data.name:upper(), c.prefix, keyword))
         cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
-        cecho(string.format("%s%s<reset>\n", c.text, Vanity.descriptions[name]))
+        cecho(string.format("%s%s<reset>\n", c.text, data.content))
         cecho(string.format("%s=======================================================================<reset>\n", c.border))
     else
-        Vanity.echo(string.format("%sDescription '%s' not found.<reset>", c.error, name))
+        Vanity.echo(string.format("%sKeyword '%s' not found.<reset>", c.error, keyword))
+    end
+end
+
+function Vanity.editDescription(keyword)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    
+    if Vanity.descriptions[keyword] then
+        local data = Vanity.descriptions[keyword]
+        clearCmdLine()
+        appendCmdLine(string.format("vanity update %s \"%s\" %s", keyword, data.name, data.content))
+        Vanity.echo(string.format("%sDescription [%s%s%s] loaded into your command line. Edit it and press Enter to save!<reset>", c.text, c.highlight, keyword, c.text))
+    else
+        Vanity.echo(string.format("%sKeyword '%s' not found.<reset>", c.error, keyword))
     end
 end
 
@@ -234,43 +350,20 @@ function Vanity.listDescriptions()
     cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
     
     local count = 0
-    for name, content in pairs(Vanity.descriptions) do
-        local preview = string.sub(content, 1, 60)
-        if string.len(content) > 60 then preview = preview .. "..." end
-        cecho(string.format("%s%-15s<reset> : %s%s<reset>\n", c.highlight, name, c.text, preview))
+    for keyword, data in pairs(Vanity.descriptions) do
+        local preview = string.sub(data.content, 1, 35)
+        if string.len(data.content) > 35 then preview = preview .. "..." end
+        
+        cecho("  ")
+        cechoLink(string.format("%s[%-10s]<reset>", c.highlight, keyword), [[Vanity.useDescription("]]..keyword..[[")]], "Click to activate " .. data.name, true)
+        cecho(string.format(" %s%-20s<reset> : %s%s<reset>\n", c.prefix, data.name, c.text, preview))
         count = count + 1
     end
     
     if count == 0 then
-        cecho(string.format("\n%sNo descriptions saved yet. Use %svanity update <name> <desc>%s to create one.<reset>\n", c.text, c.highlight, c.text))
+        cecho(string.format("\n%sNo descriptions saved yet. Use %svanity add <keyword> \"<Name>\" <desc>%s to create one.<reset>\n", c.text, c.highlight, c.text))
     end
     cecho(string.format("%s=======================================================================<reset>\n", c.border))
-end
-
-function Vanity.deleteDescription(name)
-    name = name:lower()
-    local c = Vanity.config.colors
-    
-    if Vanity.descriptions[name] then
-        Vanity.descriptions[name] = nil
-        Vanity.save()
-        Vanity.echo(string.format("%sDescription '%s%s%s' deleted.<reset>", c.text, c.highlight, name, c.text))
-    else
-        Vanity.echo(string.format("%sDescription '%s' not found.<reset>", c.error, name))
-    end
-end
-
-function Vanity.editDescription(name)
-    name = name:lower()
-    local c = Vanity.config.colors
-    
-    if Vanity.descriptions[name] then
-        clearCmdLine()
-        appendCmdLine("vanity update " .. name .. " " .. Vanity.descriptions[name])
-        Vanity.echo(string.format("%sDescription '%s%s%s' loaded into your command line. Edit it and press Enter to save!<reset>", c.text, c.highlight, name, c.text))
-    else
-        Vanity.echo(string.format("%sDescription '%s' not found.<reset>", c.error, name))
-    end
 end
 
 -- =========================================================================
@@ -282,19 +375,20 @@ function Vanity.showDashboard()
     cecho(string.format("\n%s                     V A N I T Y   D A S H B O A R D                   <reset>", c.border))
     cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
     
-    cecho(string.format("\n%sCurrent Components:<reset>\n", c.prefix))
-    local comps = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
-    for _, k in ipairs(comps) do
-        local val = Vanity.components[k] or "Not set"
-        cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, k, c.text, val))
+    cecho(string.format("\n%sCurrent Elements:<reset>\n", c.prefix))
+    local elems = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
+    for _, k in ipairs(elems) do
+        local val = Vanity.elements[k] or "Not set"
+        local niceName = k:lower():gsub("^%l", string.upper)
+        cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, niceName, c.text, val))
     end
 
-    cecho(string.format("\n%sSaved Descriptions:<reset>\n", c.prefix))
+    cecho(string.format("\n%sSaved Descriptions (Click Keyword to Activate):<reset>\n", c.prefix))
     local count = 0
-    for name, content in pairs(Vanity.descriptions) do
-        local preview = string.sub(content, 1, 55)
-        if string.len(content) > 55 then preview = preview .. "..." end
-        cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, name, c.text, preview))
+    for keyword, data in pairs(Vanity.descriptions) do
+        cecho("  ")
+        cechoLink(string.format("%s[%-10s]<reset>", c.highlight, keyword), [[Vanity.useDescription("]]..keyword..[[")]], "Activate " .. data.name, true)
+        cecho(string.format(" %s%s<reset>\n", c.text, data.name))
         count = count + 1
     end
     if count == 0 then
@@ -302,9 +396,9 @@ function Vanity.showDashboard()
     end
     
     cecho(string.format("\n%sQuick Syntax Guide:<reset>\n", c.prefix))
-    cecho(string.format("  %svanity update <name> <text><reset>      - Save a main description.\n", c.highlight))
-    cecho(string.format("  %svanity comp update <type> <text><reset> - Save a component.\n", c.highlight))
-    cecho(string.format("  %svanity help<reset>                      - View the full list of commands.\n", c.warning))
+    cecho(string.format("  %svanity add <keyword> \"<Name>\" <text><reset>  - Save a new description.\n", c.highlight))
+    cecho(string.format("  %svanity elem update <type> <text><reset>      - Save an element.\n", c.highlight))
+    cecho(string.format("  %svanity help<reset>                           - View the full list of commands.\n", c.warning))
 
     cecho(string.format("%s=======================================================================<reset>\n", c.border))
 end
@@ -316,18 +410,21 @@ function Vanity.showHelp()
     cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
     
     cecho(string.format("\n%sMain Descriptions:<reset>", c.prefix))
-    cecho(string.format("\n  %svanity update <name> <text><reset> - Creates or overwrites a full description.", c.highlight))
-    cecho(string.format("\n  %svanity use <name><reset>           - Sends DESCRIBE SELF <text> to Achaea.", c.highlight))
-    cecho(string.format("\n  %svanity show <name><reset>          - Displays the full text of a description.", c.highlight))
-    cecho(string.format("\n  %svanity list<reset>                 - Displays a preview of all descriptions.", c.highlight))
-    cecho(string.format("\n  %svanity edit <name><reset>          - Loads a description into input to edit.", c.highlight))
-    cecho(string.format("\n  %svanity delete <name><reset>        - Removes a saved description.", c.highlight))
+    cecho(string.format("\n  %svanity add <keyword> \"<Name>\" <text><reset>     - Creates a new description.", c.highlight))
+    cecho(string.format("\n  %svanity update <keyword> \"<Name>\" <text><reset>  - Updates an existing description.", c.highlight))
+    cecho(string.format("\n  %svanity update <keyword> <text><reset>           - Updates text only (keeps Name).", c.highlight))
+    cecho(string.format("\n  %svanity copy <old_key> <new_key> \"<Name>\"<reset> - Copies an existing description.", c.highlight))
+    cecho(string.format("\n  %svanity use <keyword><reset>                     - Sends description to Achaea.", c.highlight))
+    cecho(string.format("\n  %svanity show <keyword><reset>                    - Displays the full text.", c.highlight))
+    cecho(string.format("\n  %svanity list<reset>                              - Displays a table of all descriptions.", c.highlight))
+    cecho(string.format("\n  %svanity edit <keyword><reset>                    - Loads description into input to edit.", c.highlight))
+    cecho(string.format("\n  %svanity delete <keyword> CONFIRM<reset>          - Safely removes a description.", c.highlight))
     
-    cecho(string.format("\n\n%sComponent Descriptions:<reset>", c.prefix))
-    cecho(string.format("\n  %svanity comp update <type> <text><reset> - Sets a component (e.g. HAIR blonde).", c.highlight))
-    cecho(string.format("\n  %svanity comp update BALD<reset>          - Sets your character to bald.", c.highlight))
-    cecho(string.format("\n  %svanity comp list<reset>                 - Shows your local saved components.", c.highlight))
-    cecho(string.format("\n  %svanity comp combine [name]<reset>       - Generates a full desc from components.", c.highlight))
+    cecho(string.format("\n\n%sElement Descriptions:<reset>", c.prefix))
+    cecho(string.format("\n  %svanity elem update <type> <text><reset>         - Sets an element (e.g. HAIR blonde).", c.highlight))
+    cecho(string.format("\n  %svanity elem update BALD<reset>                  - Sets your character to bald.", c.highlight))
+    cecho(string.format("\n  %svanity elem list<reset>                         - Shows your local saved elements.", c.highlight))
+    cecho(string.format("\n  %svanity elem combine <keyword> \"<Name>\"<reset>   - Generates & saves a full desc.", c.highlight))
     
     cecho(string.format("\n\n%s=======================================================================<reset>\n", c.border))
 end
@@ -343,34 +440,44 @@ function Vanity.handleCommand(args)
         Vanity.listDescriptions()
     else
         -- Main Description Parsers
-        local updateName, updateContent = string.match(args, "^[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+(.+)$")
-        local useName = string.match(args, "^[Uu][Ss][Ee]%s+(%w+)$")
-        local showName = string.match(args, "^[Ss][Hh][Oo][Ww]%s+(%w+)$")
-        local deleteName = string.match(args, "^[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)$")
-        local editName = string.match(args, "^[Ee][Dd][Ii][Tt]%s+(%w+)$")
+        local addKey, addName, addContent = string.match(args, "^[Aa][Dd][Dd]%s+(%w+)%s+\"([^\"]+)\"%s+(.+)$")
+        local updKeyName, updName, updContentName = string.match(args, "^[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+\"([^\"]+)\"%s+(.+)$")
+        local updKey, updContent = string.match(args, "^[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+(.+)$")
+        local copyOld, copyNew, copyName = string.match(args, "^[Cc][Oo][Pp][Yy]%s+(%w+)%s+(%w+)%s+\"([^\"]+)\"$")
+        local useKey = string.match(args, "^[Uu][Ss][Ee]%s+(%w+)$")
+        local showKey = string.match(args, "^[Ss][Hh][Oo][Ww]%s+(%w+)$")
+        local delKey, delConfirm = string.match(args, "^[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)%s*(.*)$")
+        local editKey = string.match(args, "^[Ee][Dd][Ii][Tt]%s+(%w+)$")
         
-        -- Component Parsers
-        local compUpdateType, compUpdateText = string.match(args, "^[Cc][Oo][Mm][Pp]%s+[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%a+)%s*(.*)$")
-        local compList = string.match(args, "^[Cc][Oo][Mm][Pp]%s+[Ll][Ii][Ss][Tt]$")
-        local compCombine = string.match(args, "^[Cc][Oo][Mm][Pp]%s+[Cc][Oo][Mm][Bb][Ii][Nn][Ee]%s*(%w*)$")
+        -- Element Parsers
+        local elemUpdateType, elemUpdateText = string.match(args, "^[Ee][Ll][Ee][Mm]%s+[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%a+)%s*(.*)$")
+        local elemList = string.match(args, "^[Ee][Ll][Ee][Mm]%s+[Ll][Ii][Ss][Tt]$")
+        local elemCombineAll = string.match(args, "^[Ee][Ll][Ee][Mm]%s+[Cc][Oo][Mm][Bb][Ii][Nn][Ee]%s*(.*)$")
         
         -- Routing Logic
-        if compUpdateType then
-            Vanity.updateComponent(compUpdateType, compUpdateText)
-        elseif compList then
-            Vanity.listComponents()
-        elseif compCombine then
-            Vanity.combineComponents(compCombine ~= "" and compCombine or nil)
-        elseif updateName and updateContent then
-            Vanity.updateDescription(updateName, updateContent)
-        elseif useName then
-            Vanity.useDescription(useName)
-        elseif showName then
-            Vanity.showDescription(showName)
-        elseif editName then
-            Vanity.editDescription(editName)
-        elseif deleteName then
-            Vanity.deleteDescription(deleteName)
+        if elemUpdateType then
+            Vanity.updateElement(elemUpdateType, elemUpdateText)
+        elseif elemList then
+            Vanity.listElements()
+        elseif elemCombineAll then
+            local combKey, combName = string.match(elemCombineAll, "^(%w+)%s+\"([^\"]+)\"$")
+            Vanity.combineElements(combKey, combName)
+        elseif addKey then
+            Vanity.addDescription(addKey, addName, addContent)
+        elseif updKeyName then
+            Vanity.updateDescription(updKeyName, updName, updContentName)
+        elseif updKey then
+            Vanity.updateDescription(updKey, nil, updContent)
+        elseif copyOld then
+            Vanity.copyDescription(copyOld, copyNew, copyName)
+        elseif useKey then
+            Vanity.useDescription(useKey)
+        elseif showKey then
+            Vanity.showDescription(showKey)
+        elseif editKey then
+            Vanity.editDescription(editKey)
+        elseif delKey then
+            Vanity.deleteDescription(delKey, delConfirm)
         else
             Vanity.echo(string.format("%sUnknown command or invalid syntax. Type %svanity help%s for options.<reset>", Vanity.config.colors.error, Vanity.config.colors.highlight, Vanity.config.colors.error))
         end
