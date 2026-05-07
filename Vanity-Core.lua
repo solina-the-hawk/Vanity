@@ -21,8 +21,8 @@ Vanity.config = {
         main = 2034,
         element = 75
     },
-    -- Set to false if you want to see Achaea's "This is what your description looks like now" text
-    gagGameEcho = true 
+    gagGameEcho = true,
+    debug = false -- Toggle via 'vanity debug' in-game
 }
 
 Vanity.descriptions = Vanity.descriptions or {}
@@ -62,14 +62,13 @@ function Vanity.load()
         local data = {}
         table.load(newFile, data)
         Vanity.descriptions = data.descriptions or {}
-        Vanity.elements = data.elements or data.components or {} -- Catch old 'components' if they exist
+        Vanity.elements = data.elements or data.components or {} 
         
-        -- Migrate old string-only descriptions to the new {name, content} table format
         local migrated = false
         for k, v in pairs(Vanity.descriptions) do
             if type(v) == "string" then
                 Vanity.descriptions[k] = {
-                    name = k:gsub("^%l", string.upper), -- Capitalize the keyword for a default name
+                    name = k:gsub("^%l", string.upper), 
                     content = v
                 }
                 migrated = true
@@ -83,24 +82,55 @@ function Vanity.load()
 end
 
 -- =========================================================================
--- Utility: Gag Game Echoes
+-- Utility: Gag Game Echoes (Smart Line Eater)
 -- =========================================================================
 function Vanity.gagEcho()
     if not Vanity.config.gagGameEcho then return end
     
-    -- Catch the standard Achaea description echo and the line immediately following it
-    if Vanity.gagTrig then killTrigger(Vanity.gagTrig) end
-    Vanity.gagTrig = tempRegexTrigger("^This is what your description looks like now\\.$", function()
-        deleteLine()
-        if Vanity.gagDescTrig then killTrigger(Vanity.gagDescTrig) end
-        Vanity.gagDescTrig = tempRegexTrigger("^.*$", function()
-            deleteLine()
-        end, 1)
-        tempTimer(0.3, function() if Vanity.gagDescTrig then killTrigger(Vanity.gagDescTrig) end end)
-    end, 1)
+    if Vanity.gagStartTrig then killTrigger(Vanity.gagStartTrig) end
     
-    -- Cleanup the initial trigger if it doesn't fire within 1 second
-    tempTimer(1, function() if Vanity.gagTrig then killTrigger(Vanity.gagTrig) end end)
+    -- We look for either anchor in case Achaea skips one for some reason
+    Vanity.gagStartTrig = tempRegexTrigger("^(Your previous description was:|This is now how you appear:)", function()
+        deleteLine()
+        
+        if Vanity.config.debug then Vanity.echo("GAG START triggered by: " .. line) end
+        
+        if Vanity.gagEaterTrig then killTrigger(Vanity.gagEaterTrig) end
+        
+        -- This trigger blindly eats every line that follows
+        Vanity.gagEaterTrig = tempRegexTrigger("^.*$", function()
+            if Vanity.config.debug then
+                cecho("<red>[EATING]:<reset> " .. line .. "\n")
+            end
+            
+            deleteLine()
+            
+            -- Stop eating the moment we see the final anchor text
+            if string.find(line, "try LOOK ME.", 1, true) then
+                killTrigger(Vanity.gagEaterTrig)
+                Vanity.gagEaterTrig = nil
+                if Vanity.config.debug then Vanity.echo("GAG STOPPED safely at LOOK ME anchor.") end
+            end
+        end)
+        
+        -- Failsafe: 1.5 seconds gives plenty of time for packet fragmentation to resolve
+        tempTimer(1.5, function() 
+            if Vanity.gagEaterTrig then 
+                killTrigger(Vanity.gagEaterTrig) 
+                Vanity.gagEaterTrig = nil
+                if Vanity.config.debug then Vanity.echo("GAG FAILSAFE triggered (1.5s timeout expired).") end
+            end 
+        end)
+    end)
+    
+    -- Cleanup the initial watcher if nothing happens
+    tempTimer(2, function() 
+        if Vanity.gagStartTrig then 
+            killTrigger(Vanity.gagStartTrig)
+            Vanity.gagStartTrig = nil 
+            if Vanity.config.debug then Vanity.echo("Gag Start Trigger expired waiting for Achaea.") end
+        end 
+    end)
 end
 
 -- =========================================================================
@@ -132,7 +162,7 @@ function Vanity.checkStyle(text)
 end
 
 -- =========================================================================
--- Element Features (Formerly Components)
+-- Element Features
 -- =========================================================================
 function Vanity.updateElement(elemType, text)
     elemType = elemType:upper()
@@ -236,7 +266,6 @@ function Vanity.updateDescription(keyword, name, content)
         return
     end
     
-    -- If no new name is provided, keep the old one
     name = name or Vanity.descriptions[keyword].name
     Vanity.performSaveLogic(keyword, name, content, "updated")
 end
@@ -349,14 +378,25 @@ function Vanity.listDescriptions()
     cecho(string.format("\n%s                        V A N I T Y   L I S T                          <reset>", c.border))
     cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
     
+    -- Dynamic Padding Calculator
+    local maxKeyLen = 10
+    local maxNameLen = 20
+    for k, d in pairs(Vanity.descriptions) do
+        if #k > maxKeyLen then maxKeyLen = #k end
+        if #d.name > maxNameLen then maxNameLen = #d.name end
+    end
+    
     local count = 0
     for keyword, data in pairs(Vanity.descriptions) do
         local preview = string.sub(data.content, 1, 35)
         if string.len(data.content) > 35 then preview = preview .. "..." end
         
+        local keyPad = keyword .. string.rep(" ", maxKeyLen - #keyword)
+        local namePad = data.name .. string.rep(" ", maxNameLen - #data.name)
+        
         cecho("  ")
-        cechoLink(string.format("%s[%-10s]<reset>", c.highlight, keyword), [[Vanity.useDescription("]]..keyword..[[")]], "Click to activate " .. data.name, true)
-        cecho(string.format(" %s%-20s<reset> : %s%s<reset>\n", c.prefix, data.name, c.text, preview))
+        cechoLink(string.format("%s[%s]<reset>", c.highlight, keyPad), [[Vanity.useDescription("]]..keyword..[[")]], "Click to activate " .. data.name, true)
+        cecho(string.format(" %s%s<reset> : %s%s<reset>\n", c.prefix, namePad, c.text, preview))
         count = count + 1
     end
     
@@ -384,10 +424,19 @@ function Vanity.showDashboard()
     end
 
     cecho(string.format("\n%sSaved Descriptions (Click Keyword to Activate):<reset>\n", c.prefix))
+    
+    -- Dynamic Padding Calculator
+    local maxKeyLen = 10
+    for k, d in pairs(Vanity.descriptions) do
+        if #k > maxKeyLen then maxKeyLen = #k end
+    end
+    
     local count = 0
     for keyword, data in pairs(Vanity.descriptions) do
+        local keyPad = keyword .. string.rep(" ", maxKeyLen - #keyword)
+        
         cecho("  ")
-        cechoLink(string.format("%s[%-10s]<reset>", c.highlight, keyword), [[Vanity.useDescription("]]..keyword..[[")]], "Activate " .. data.name, true)
+        cechoLink(string.format("%s[%s]<reset>", c.highlight, keyPad), [[Vanity.useDescription("]]..keyword..[[")]], "Activate " .. data.name, true)
         cecho(string.format(" %s%s<reset>\n", c.text, data.name))
         count = count + 1
     end
@@ -396,6 +445,7 @@ function Vanity.showDashboard()
     end
     
     cecho(string.format("\n%sQuick Syntax Guide:<reset>\n", c.prefix))
+    cecho(string.format("  %svanity use <keyword><reset>                  - Activate a saved description.\n", c.highlight))
     cecho(string.format("  %svanity add <keyword> \"<Name>\" <text><reset>  - Save a new description.\n", c.highlight))
     cecho(string.format("  %svanity elem update <type> <text><reset>      - Save an element.\n", c.highlight))
     cecho(string.format("  %svanity help<reset>                           - View the full list of commands.\n", c.warning))
@@ -426,6 +476,9 @@ function Vanity.showHelp()
     cecho(string.format("\n  %svanity elem list<reset>                         - Shows your local saved elements.", c.highlight))
     cecho(string.format("\n  %svanity elem combine <keyword> \"<Name>\"<reset>   - Generates & saves a full desc.", c.highlight))
     
+    cecho(string.format("\n\n%sUtility:<reset>", c.prefix))
+    cecho(string.format("\n  %svanity debug<reset>                             - Toggles gag visualizer.", c.highlight))
+
     cecho(string.format("\n\n%s=======================================================================<reset>\n", c.border))
 end
 
@@ -438,6 +491,10 @@ function Vanity.handleCommand(args)
         Vanity.showHelp()
     elseif cmd == "list" then
         Vanity.listDescriptions()
+    elseif cmd == "debug" then
+        Vanity.config.debug = not Vanity.config.debug
+        local state = Vanity.config.debug and "<green>ON<reset>" or "<red>OFF<reset>"
+        Vanity.echo("Debug mode is now " .. state)
     else
         -- Main Description Parsers
         local addKey, addName, addContent = string.match(args, "^[Aa][Dd][Dd]%s+(%w+)%s+\"([^\"]+)\"%s+(.+)$")
