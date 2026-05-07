@@ -1,0 +1,6 @@
+Vanity: Modular Character Description Manager (v1.0.0)
+
+A streamlined, zero-dependency character description manager for Achaea.
+Vanity organizes your character's main descriptions and physical elements (hair, eyes, build, etc.) into an easy-to-use local database, allowing you to seamlessly swap appearances on the fly.
+Features include an interactive dashboard, automated style-checking to keep your descriptions lore-friendly, an element combiner to generate full descriptions from your physical traits, and command-line injection for fast, in-line editing.
+To get started, simply install the package and type "vanity" in the game to view your dashboard, or "vanity help" for a full list of commands!
