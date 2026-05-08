@@ -1,6 +1,7 @@
 Vanity: Modular Character Description Manager (v1.0.0)
 
-A streamlined, zero-dependency character description manager for Achaea.
-Vanity organizes your character's main descriptions and physical elements (hair, eyes, build, etc.) into an easy-to-use local database, allowing you to seamlessly swap appearances on the fly.
-Features include an interactive dashboard, automated style-checking to keep your descriptions lore-friendly, an element combiner to generate full descriptions from your physical traits, and command-line injection for fast, in-line editing.
-To get started, simply install the package and type "vanity" in the game to view your dashboard, or "vanity help" for a full list of commands!
+A centralized, zero-dependency script interface for Mudlet to easily swap and build character descriptions in Achaea.
+Vanity cleanly organizes your saved descriptions, modular elements (hair, eyes, build), and poses into an easy-to-use in-client dashboard.
+Features include temporary poses that automatically clear via GMCP when you move rooms, dynamic add-on strings for temporary gear or roleplay states, and a smart style-checker to prevent common description faux pas.
+To adjust your color theme, character limits, or to toggle the game-echo gagging, simply open the Vanity script in your Script Editor and adjust the configuration block at the top.
+You can also type "vanity help" in the game to see a list of on-the-fly commands and dashboard tools!

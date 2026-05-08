@@ -1,43 +1,37 @@
 # Vanity
-**A modular character description manager for Achaea and Mudlet.**
+**A streamlined, zero-dependency character description and pose manager for Achaea and Mudlet.**
 
-Vanity is a lightweight, zero-dependency script that takes the headache out of managing character descriptions. Instead of relying on sprawling Mudlet buttons, clunky aliases, or losing track of your various outfits, Vanity saves your descriptions to a local database and lets you manage, edit, and swap between them seamlessly. 
+Vanity is a modern, lightweight system that removes the headache of managing character appearances and poses manually via aliases or clunky XML packages. It captures, stores, and organizes your various saved descriptions, modular elements, and stances into an easy-to-navigate dashboard. 
 
-It fully supports Achaea's physical element system (Hair, Eyes, Build, etc.) and includes built-in style checking to keep your roleplay top-notch.
+Unlike older systems, Vanity has zero external dependencies, relies purely on single-script architecture, and automatically gags server spam when swapping descriptions.
 
 ---
-## Screenshots
-*(Add your image links here! e.g., `<img width="800" src="...">`)*
 
 ## Features
 
-* **Zero Bloat:** Single-script architecture. No messy XML packages, complex triggers, or reliance on external dependencies.
-* **Keyword Database:** Save, load, and organize your favorite descriptions using easy-to-remember keywords and display names. 
-* **Elements Manager:** Update your character's specific physical components (Hair, Eyes, Complexion, Height, Build) and effortlessly push them to the game.
-* **Description Generator:** Combine your currently saved physical elements into a cohesive, experimental full-text description with a single command.
-* **In-Line Editing:** Bypasses Mudlet's hardcoded C++ editor by using command-line injection, loading your saved descriptions directly into your input bar for fast, frustration-free editing.
-* **Smart Style Checking:** Automatically scans your descriptions against Achaea's `HELP STYLE` rules to warn you about accidentally including clothing, godmoding emotional reactions, or using redundant gender/race flags.
-* **Interactive Dashboard:** Type `vanity` at any time to pull up a clean, clickable UI in your main window showing your current elements and saved descriptions.
+* **Zero Bloat:** Single-script architecture. No reliance on legacy packages or bloated XML files.
+* **Modular Elements:** Quickly set or update individual elements like `HEIGHT`, `EYES`, or `COMPLEXION`. Includes a 1-click `BALD` feature! You can even generate a combined description directly from your active elements.
+* **Smart Poses:** Save and swap between poses instantly. You can apply a standard `POSE`, or use a `TPOSE` (Temporary Pose) which automatically clears itself the moment you walk into a new room. 
+* **Dynamic Add-ons:** Have temporary gear, wounds, or a roleplay state you want added to the end of your description? Toggle an add-on string that automatically appends itself to whatever primary description you activate.
+* **Style Checker:** Vanity acts as a gentle editor, warning you if your description includes Godmoding, repeats your automatically-prepended race/gender, or describes clothing that the game already handles via your inventory.
+* **Dashboard Interface:** Type `vanity` in-game to see a clean, clickable UI of all your active elements, add-ons, and saved keywords. 
 
 ---
 
 ## Installation
 
 1. Download the `Vanity.mpackage` or import the `Vanity-Core.lua` script directly into your Mudlet Script Editor.
-2. Save the script to initialize the system. 
-3. Type `vanity` in the game to view your dashboard, or `vanity help` to see a full list of commands!
-
-*(Note: Vanity safely stores your saved descriptions inside your Mudlet Profile folder. You can find your `Vanity_Data.lua` file by typing `lua getMudletHomeDir()` in your Mudlet input line and navigating to the `/Vanity` directory.)*
+2. Save the script. It will automatically initialize. 
+3. Edit the `Vanity.config` block at the top of the script to adjust colors, character limits, or debug modes to your liking.
+4. Type `vanity help` in the game for a list of helpful commands to start building your library!
 
 ---
 
-## Quick Command Guide
+## Accessing Your Data
 
-Vanity is entirely command-driven. Here are a few essentials to get you started:
+Vanity stores your saved descriptions, poses, and active elements in a clean JSON/Lua format so they are preserved across sessions. 
 
-* **`vanity`** - Opens the interactive dashboard.
-* **`vanity help`** - Displays the full syntax guide.
-* **`vanity add <keyword> "<Name>" <text>`** - Saves a brand new description.
-* **`vanity use <keyword>`** - Instantly sends your saved description to the game.
-* **`vanity edit <keyword>`** - Drops your saved description into the command line so you can easily fix typos or add details.
-* **`vanity elem update <type> <text>`** - Sets a specific physical element (e.g., `vanity elem update HAIR long blonde hair`).
+To find your saved data file, look in your Mudlet Profile folder. If you're not sure where that is, open Mudlet's main input line and type:
+`lua getMudletHomeDir()`
+
+Navigate to that folder on your computer, and you will find a directory named **Vanity**. Inside, you will see your `Vanity_Data.lua` configuration file, which can easily be copied or shared with alt characters.

@@ -2,6 +2,8 @@
 -- VANITY: Modular Character Description Manager
 -- A central script interface for Mudlet, allowing you to easily swap and
 -- build character descriptions in Achaea without relying on XML packages.
+-- Author: Solina (https://github.com/solina-the-hawk/vanity/)
+-- Version: 1.0.0
 -- =========================================================================
 Vanity = Vanity or {}
 
@@ -14,12 +16,13 @@ Vanity.config = {
         prefix    = "<orchid>",
         text      = "<white>",
         highlight = "<gold>",
-        error     = "<crimson>",
+        error     = "<red>",
         warning   = "<orange>"
     },
     limits = {
         main = 2034,
-        element = 75
+        element = 75,
+        pose = 60
     },
     gagGameEcho = true,
     debug = false -- Toggle via 'vanity debug' in-game
@@ -27,6 +30,10 @@ Vanity.config = {
 
 Vanity.descriptions = Vanity.descriptions or {}
 Vanity.elements = Vanity.elements or {}
+Vanity.addon = Vanity.addon or { text = "", enabled = false }
+Vanity.poses = Vanity.poses or {}
+Vanity.currentPose = Vanity.currentPose or { type = "None", text = "Not set" }
+Vanity.lastRoom = Vanity.lastRoom or 0
 
 -- =========================================================================
 -- Standardized Output Helper
@@ -47,7 +54,10 @@ function Vanity.save()
     
     local data = {
         descriptions = Vanity.descriptions,
-        elements = Vanity.elements
+        elements = Vanity.elements,
+        addon = Vanity.addon,
+        poses = Vanity.poses,
+        currentPose = Vanity.currentPose
     }
     
     local filepath = baseDir .. "/Vanity_Data.lua"
@@ -63,6 +73,9 @@ function Vanity.load()
         table.load(newFile, data)
         Vanity.descriptions = data.descriptions or {}
         Vanity.elements = data.elements or data.components or {} 
+        Vanity.addon = data.addon or { text = "", enabled = false }
+        Vanity.poses = data.poses or {}
+        Vanity.currentPose = data.currentPose or { type = "None", text = "Not set" }
         
         local migrated = false
         for k, v in pairs(Vanity.descriptions) do
@@ -82,14 +95,13 @@ function Vanity.load()
 end
 
 -- =========================================================================
--- Utility: Gag Game Echoes (Smart Line Eater)
+-- Utility: Gag Game Echoes & Room Tracking
 -- =========================================================================
 function Vanity.gagEcho()
     if not Vanity.config.gagGameEcho then return end
     
     if Vanity.gagStartTrig then killTrigger(Vanity.gagStartTrig) end
     
-    -- We look for either anchor in case Achaea skips one for some reason
     Vanity.gagStartTrig = tempRegexTrigger("^(Your previous description was:|This is now how you appear:)", function()
         deleteLine()
         
@@ -97,7 +109,6 @@ function Vanity.gagEcho()
         
         if Vanity.gagEaterTrig then killTrigger(Vanity.gagEaterTrig) end
         
-        -- This trigger blindly eats every line that follows
         Vanity.gagEaterTrig = tempRegexTrigger("^.*$", function()
             if Vanity.config.debug then
                 cecho("<red>[EATING]:<reset> " .. line .. "\n")
@@ -105,7 +116,6 @@ function Vanity.gagEcho()
             
             deleteLine()
             
-            -- Stop eating the moment we see the final anchor text
             if string.find(line, "try LOOK ME.", 1, true) then
                 killTrigger(Vanity.gagEaterTrig)
                 Vanity.gagEaterTrig = nil
@@ -113,7 +123,6 @@ function Vanity.gagEcho()
             end
         end)
         
-        -- Failsafe: 1.5 seconds gives plenty of time for packet fragmentation to resolve
         tempTimer(1.5, function() 
             if Vanity.gagEaterTrig then 
                 killTrigger(Vanity.gagEaterTrig) 
@@ -123,7 +132,6 @@ function Vanity.gagEcho()
         end)
     end)
     
-    -- Cleanup the initial watcher if nothing happens
     tempTimer(2, function() 
         if Vanity.gagStartTrig then 
             killTrigger(Vanity.gagStartTrig)
@@ -131,6 +139,22 @@ function Vanity.gagEcho()
             if Vanity.config.debug then Vanity.echo("Gag Start Trigger expired waiting for Achaea.") end
         end 
     end)
+end
+
+function Vanity.onRoomMove()
+    if not gmcp or not gmcp.Room or not gmcp.Room.Info then return end
+    
+    local currentRoom = gmcp.Room.Info.num
+    
+    if Vanity.lastRoom ~= 0 and Vanity.lastRoom ~= currentRoom then
+        if Vanity.currentPose.type == "TPOSE" then
+            Vanity.currentPose = { type = "None", text = "Not set" }
+            Vanity.save()
+            if Vanity.config.debug then Vanity.echo("TPOSE silently cleared due to room movement.") end
+        end
+    end
+    
+    Vanity.lastRoom = currentRoom
 end
 
 -- =========================================================================
@@ -159,6 +183,121 @@ function Vanity.checkStyle(text)
             cecho(string.format("  %s*%s %s%s<reset>\n", c.highlight, c.text, c.text, w))
         end
     end
+end
+
+-- =========================================================================
+-- Pose Features
+-- =========================================================================
+function Vanity.validatePose(text)
+    local c = Vanity.config.colors
+    if not string.find(text, "%^") then
+        Vanity.echo(string.format("%sERROR: A pose must include a '^' character to represent your name.<reset>", c.error))
+        return false
+    end
+    if string.len(text) > Vanity.config.limits.pose then
+        Vanity.echo(string.format("%sERROR: Pose is %d characters. The maximum length is %d.<reset>", c.error, string.len(text), Vanity.config.limits.pose))
+        return false
+    end
+    return true
+end
+
+function Vanity.addPose(keyword, text)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    if Vanity.poses[keyword] then
+        Vanity.echo(string.format("%sPose keyword '%s' already exists! Use %svanity pose update%s instead.<reset>", c.error, keyword, c.highlight, c.error))
+        return
+    end
+    if Vanity.validatePose(text) then
+        Vanity.poses[keyword] = text
+        Vanity.save()
+        Vanity.echo(string.format("%sPose [%s%s%s] saved successfully.<reset>", c.text, c.highlight, keyword, c.text))
+    end
+end
+
+function Vanity.updatePose(keyword, text)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    if not Vanity.poses[keyword] then
+        Vanity.echo(string.format("%sPose keyword '%s' not found! Use %svanity pose add%s instead.<reset>", c.error, keyword, c.highlight, c.error))
+        return
+    end
+    if Vanity.validatePose(text) then
+        Vanity.poses[keyword] = text
+        Vanity.save()
+        Vanity.echo(string.format("%sPose [%s%s%s] updated successfully.<reset>", c.text, c.highlight, keyword, c.text))
+    end
+end
+
+function Vanity.usePose(keyword, isTemp)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    if not Vanity.poses[keyword] then
+        Vanity.echo(string.format("%sPose keyword '%s' not found.<reset>", c.error, keyword))
+        return
+    end
+    
+    local text = Vanity.poses[keyword]
+    local command = isTemp and "TPOSE " or "POSE "
+    local pType = isTemp and "TPOSE" or "POSE"
+    
+    send(command .. text)
+    Vanity.currentPose = { type = pType, text = text }
+    Vanity.save()
+    Vanity.echo(string.format("%sApplied %s [%s%s%s]: %s<reset>", c.text, pType, c.highlight, keyword, c.text, text))
+end
+
+function Vanity.clearPose()
+    local c = Vanity.config.colors
+    send("UNPOSE")
+    Vanity.currentPose = { type = "None", text = "Not set" }
+    Vanity.save()
+    Vanity.echo(string.format("%sPose cleared.<reset>", c.text))
+end
+
+function Vanity.deletePose(keyword)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    if Vanity.poses[keyword] then
+        Vanity.poses[keyword] = nil
+        Vanity.save()
+        Vanity.echo(string.format("%sPose [%s%s%s] deleted.<reset>", c.text, c.highlight, keyword, c.text))
+    else
+        Vanity.echo(string.format("%sPose keyword '%s' not found.<reset>", c.error, keyword))
+    end
+end
+
+function Vanity.syncPose()
+    local c = Vanity.config.colors
+    
+    if Vanity.syncPosePosTrig then killTrigger(Vanity.syncPosePosTrig) end
+    if Vanity.syncPoseNegTrig then killTrigger(Vanity.syncPoseNegTrig) end
+    
+    Vanity.syncPosePosTrig = tempRegexTrigger("^You are (?:currently )?posing as: (.*)$", function()
+        deleteLine()
+        local text = matches[2]
+        
+        if Vanity.currentPose.type == "TPOSE" and Vanity.currentPose.text == text then
+        else
+            Vanity.currentPose = { type = "POSE", text = text }
+        end
+        Vanity.save()
+        Vanity.echo(string.format("%sPose synced with server: %s%s<reset>", c.text, c.highlight, text))
+    end, 1)
+    
+    Vanity.syncPoseNegTrig = tempRegexTrigger("^You are not (?:currently )?posing.*$", function()
+        deleteLine()
+        Vanity.currentPose = { type = "None", text = "Not set" }
+        Vanity.save()
+        Vanity.echo(string.format("%sPose synced with server: None active.<reset>", c.text))
+    end, 1)
+    
+    tempTimer(1, function()
+        if Vanity.syncPosePosTrig then killTrigger(Vanity.syncPosePosTrig) end
+        if Vanity.syncPoseNegTrig then killTrigger(Vanity.syncPoseNegTrig) end
+    end)
+    
+    send("SHOW POSE", false)
 end
 
 -- =========================================================================
@@ -240,6 +379,38 @@ function Vanity.combineElements(saveKey, saveName)
     else
         cecho(string.format("\n%s(Tip: Use '%svanity elem combine <keyword> \"<Name>\"%s' to automatically save this.)<reset>\n", c.warning, c.highlight, c.warning))
     end
+end
+
+-- =========================================================================
+-- Add-on Features
+-- =========================================================================
+function Vanity.setAddon(text)
+    local c = Vanity.config.colors
+    Vanity.addon.text = text
+    Vanity.addon.enabled = true
+    Vanity.save()
+    Vanity.echo(string.format("%sAdd-on string set and <green>ENABLED%s: %s%s<reset>", c.text, c.text, c.highlight, text))
+end
+
+function Vanity.toggleAddon()
+    local c = Vanity.config.colors
+    if Vanity.addon.text == "" then
+        Vanity.echo(string.format("%sYou do not have an add-on string set. Use %svanity addon set <text>%s first.<reset>", c.error, c.highlight, c.error))
+        return
+    end
+    
+    Vanity.addon.enabled = not Vanity.addon.enabled
+    Vanity.save()
+    local state = Vanity.addon.enabled and "<green>ENABLED<reset>" or "<red>DISABLED<reset>"
+    Vanity.echo(string.format("%sAdd-on string is now %s.", c.text, state))
+end
+
+function Vanity.clearAddon()
+    local c = Vanity.config.colors
+    Vanity.addon.text = ""
+    Vanity.addon.enabled = false
+    Vanity.save()
+    Vanity.echo(string.format("%sAdd-on string cleared.<reset>", c.text))
 end
 
 -- =========================================================================
@@ -334,9 +505,27 @@ function Vanity.useDescription(keyword)
     local c = Vanity.config.colors
     
     if Vanity.descriptions[keyword] then
+        local finalContent = Vanity.descriptions[keyword].content
+        
+        if Vanity.addon.enabled and Vanity.addon.text ~= "" then
+            finalContent = finalContent .. " " .. Vanity.addon.text
+        end
+        
+        local length = finalContent:len()
+        local max = Vanity.config.limits.main
+        
+        if length > max then
+            Vanity.echo(string.format("%sERROR: With your add-on, the description is %d characters. The Achaea limit is %d! Try disabling the add-on or shortening the description.<reset>", c.error, length, max))
+            return
+        elseif length > (max - 100) then
+            Vanity.echo(string.format("%sWARNING: With your add-on, the description is %d characters. You are very close to the %d limit!<reset>", c.warning, length, max))
+        end
+        
         Vanity.gagEcho()
-        send("DESCRIBE SELF " .. Vanity.descriptions[keyword].content)
-        Vanity.echo(string.format("%sApplied description '%s%s%s'.<reset>", c.text, c.highlight, Vanity.descriptions[keyword].name, c.text))
+        send("DESCRIBE SELF " .. finalContent)
+        
+        local addonMsg = (Vanity.addon.enabled and Vanity.addon.text ~= "") and " (with add-on)" or ""
+        Vanity.echo(string.format("%sApplied description '%s%s%s'%s.<reset>", c.text, c.highlight, Vanity.descriptions[keyword].name, c.text, addonMsg))
     else
         Vanity.echo(string.format("%sKeyword '%s' not found.<reset>", c.error, keyword))
     end
@@ -352,6 +541,11 @@ function Vanity.showDescription(keyword)
         cecho(string.format("\n%s                 V A N I T Y : %s%s %s(%s)<reset>", c.border, c.highlight, data.name:upper(), c.prefix, keyword))
         cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
         cecho(string.format("%s%s<reset>\n", c.text, data.content))
+        
+        if Vanity.addon.enabled and Vanity.addon.text ~= "" then
+            cecho(string.format("\n%s(Add-on Active): %s%s<reset>\n", c.highlight, c.text, Vanity.addon.text))
+        end
+        
         cecho(string.format("%s=======================================================================<reset>\n", c.border))
     else
         Vanity.echo(string.format("%sKeyword '%s' not found.<reset>", c.error, keyword))
@@ -378,7 +572,6 @@ function Vanity.listDescriptions()
     cecho(string.format("\n%s                        V A N I T Y   L I S T                          <reset>", c.border))
     cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
     
-    -- Dynamic Padding Calculator
     local maxKeyLen = 10
     local maxNameLen = 20
     for k, d in pairs(Vanity.descriptions) do
@@ -423,9 +616,23 @@ function Vanity.showDashboard()
         cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, niceName, c.text, val))
     end
 
+    cecho(string.format("\n%sCurrent Add-on:<reset>\n", c.prefix))
+    if Vanity.addon.text == "" then
+        cecho(string.format("  %sNone set.<reset>\n", c.text))
+    else
+        local status = Vanity.addon.enabled and "<green>[ON]<reset>" or "<red>[OFF]<reset>"
+        cecho(string.format("  %s %s%s<reset>\n", status, c.text, Vanity.addon.text))
+    end
+    
+    cecho(string.format("\n%sCurrent Pose:<reset>\n", c.prefix))
+    if Vanity.currentPose.type == "None" then
+        cecho(string.format("  %sNone set via Vanity.<reset>\n", c.text))
+    else
+        cecho(string.format("  %s[%-5s]%s %s<reset>\n", c.highlight, Vanity.currentPose.type, c.text, Vanity.currentPose.text))
+    end
+
     cecho(string.format("\n%sSaved Descriptions (Click Keyword to Activate):<reset>\n", c.prefix))
     
-    -- Dynamic Padding Calculator
     local maxKeyLen = 10
     for k, d in pairs(Vanity.descriptions) do
         if #k > maxKeyLen then maxKeyLen = #k end
@@ -444,12 +651,24 @@ function Vanity.showDashboard()
         cecho(string.format("  %sNo descriptions saved yet.<reset>\n", c.text))
     end
     
+    cecho(string.format("\n%sSaved Poses (Click Keyword to Set as POSE):<reset>\n", c.prefix))
+    local pCount = 0
+    for pKey, pText in pairs(Vanity.poses) do
+        cecho("  ")
+        cechoLink(string.format("%s[%s]<reset>", c.highlight, pKey), [[Vanity.usePose("]]..pKey..[[", false)]], "Set as POSE", true)
+        cecho(string.format(" %s%s<reset>\n", c.text, pText))
+        pCount = pCount + 1
+    end
+    if pCount == 0 then
+        cecho(string.format("  %sNo poses saved yet.<reset>\n", c.text))
+    end
+    
     cecho(string.format("\n%sQuick Syntax Guide:<reset>\n", c.prefix))
     cecho(string.format("  %svanity use <keyword><reset>                  - Activate a saved description.\n", c.highlight))
-    cecho(string.format("  %svanity add <keyword> \"<Name>\" <text><reset>  - Save a new description.\n", c.highlight))
-    cecho(string.format("  %svanity elem update <type> <text><reset>      - Save an element.\n", c.highlight))
+    cecho(string.format("  %svanity update <keyword> <text><reset>        - Updates text (keeps name).\n", c.highlight))
+    cecho(string.format("  %svanity addon toggle<reset>                   - Toggle your add-on text.\n", c.highlight))
+    cecho(string.format("  %svanity tpose/pose use <keyword><reset>       - Sets a saved pose permanently or temporarily.\n", c.highlight))
     cecho(string.format("  %svanity help<reset>                           - View the full list of commands.\n", c.warning))
-
     cecho(string.format("%s=======================================================================<reset>\n", c.border))
 end
 
@@ -470,6 +689,20 @@ function Vanity.showHelp()
     cecho(string.format("\n  %svanity edit <keyword><reset>                    - Loads description into input to edit.", c.highlight))
     cecho(string.format("\n  %svanity delete <keyword> CONFIRM<reset>          - Safely removes a description.", c.highlight))
     
+    cecho(string.format("\n\n%sPoses:<reset>", c.prefix))
+    cecho(string.format("\n  %svanity pose add <keyword> <text><reset>         - Saves a new pose.", c.highlight))
+    cecho(string.format("\n  %svanity pose update <keyword> <text><reset>      - Updates an existing pose.", c.highlight))
+    cecho(string.format("\n  %svanity pose use <keyword><reset>                - Sets a saved pose permanently.", c.highlight))
+    cecho(string.format("\n  %svanity tpose use <keyword><reset>               - Sets a saved pose temporarily.", c.highlight))
+    cecho(string.format("\n  %svanity pose clear<reset>                        - Removes your active pose.", c.highlight))
+    cecho(string.format("\n  %svanity pose delete <keyword><reset>             - Deletes a saved pose.", c.highlight))
+    cecho(string.format("\n  %svanity pose sync<reset>                         - Syncs dashboard pose with server.", c.highlight))
+
+    cecho(string.format("\n\n%sAdd-on Strings:<reset>", c.prefix))
+    cecho(string.format("\n  %svanity addon set <text><reset>                  - Sets and enables your add-on string.", c.highlight))
+    cecho(string.format("\n  %svanity addon toggle<reset>                      - Toggles your add-on on or off.", c.highlight))
+    cecho(string.format("\n  %svanity addon clear<reset>                       - Removes your add-on string.", c.highlight))
+
     cecho(string.format("\n\n%sElement Descriptions:<reset>", c.prefix))
     cecho(string.format("\n  %svanity elem update <type> <text><reset>         - Sets an element (e.g. HAIR blonde).", c.highlight))
     cecho(string.format("\n  %svanity elem update BALD<reset>                  - Sets your character to bald.", c.highlight))
@@ -477,7 +710,7 @@ function Vanity.showHelp()
     cecho(string.format("\n  %svanity elem combine <keyword> \"<Name>\"<reset>   - Generates & saves a full desc.", c.highlight))
     
     cecho(string.format("\n\n%sUtility:<reset>", c.prefix))
-    cecho(string.format("\n  %svanity debug<reset>                             - Toggles gag visualizer.", c.highlight))
+    cecho(string.format("\n  %svanity debug<reset>                             - Toggles hiding of desc. update spam.", c.highlight))
 
     cecho(string.format("\n\n%s=======================================================================<reset>\n", c.border))
 end
@@ -496,7 +729,14 @@ function Vanity.handleCommand(args)
         local state = Vanity.config.debug and "<green>ON<reset>" or "<red>OFF<reset>"
         Vanity.echo("Debug mode is now " .. state)
     else
-        -- Main Description Parsers
+        local poseAddKey, poseAddText = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Aa][Dd][Dd]%s+(%w+)%s+(.+)$")
+        local poseUpdKey, poseUpdText = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+(.+)$")
+        local poseUseKey = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Uu][Ss][Ee]%s+(%w+)$")
+        local tposeUseKey = string.match(args, "^[Tt][Pp][Oo][Ss][Ee]%s+[Uu][Ss][Ee]%s+(%w+)$")
+        local poseClear = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Cc][Ll][Ee][Aa][Rr]$")
+        local poseDelKey = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)$")
+        local poseSync = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Ss][Yy][Nn][Cc]$")
+        
         local addKey, addName, addContent = string.match(args, "^[Aa][Dd][Dd]%s+(%w+)%s+\"([^\"]+)\"%s+(.+)$")
         local updKeyName, updName, updContentName = string.match(args, "^[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+\"([^\"]+)\"%s+(.+)$")
         local updKey, updContent = string.match(args, "^[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+(.+)$")
@@ -506,16 +746,35 @@ function Vanity.handleCommand(args)
         local delKey, delConfirm = string.match(args, "^[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)%s*(.*)$")
         local editKey = string.match(args, "^[Ee][Dd][Ii][Tt]%s+(%w+)$")
         
-        -- Element Parsers
+        local addonSet = string.match(args, "^[Aa][Dd][Dd][Oo][Nn]%s+[Ss][Ee][Tt]%s+(.+)$")
+        local addonToggle = string.match(args, "^[Aa][Dd][Dd][Oo][Nn]%s+[Tt][Oo][Gg][Gg][Ll][Ee]%s*$")
+        local addonClear = string.match(args, "^[Aa][Dd][Dd][Oo][Nn]%s+[Cc][Ll][Ee][Aa][Rr]%s*$")
+
         local elemUpdateType, elemUpdateText = string.match(args, "^[Ee][Ll][Ee][Mm]%s+[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%a+)%s*(.*)$")
-        local elemList = string.match(args, "^[Ee][Ll][Ee][Mm]%s+[Ll][Ii][Ss][Tt]$")
         local elemCombineAll = string.match(args, "^[Ee][Ll][Ee][Mm]%s+[Cc][Oo][Mm][Bb][Ii][Nn][Ee]%s*(.*)$")
         
-        -- Routing Logic
-        if elemUpdateType then
+        if poseAddKey then
+            Vanity.addPose(poseAddKey, poseAddText)
+        elseif poseUpdKey then
+            Vanity.updatePose(poseUpdKey, poseUpdText)
+        elseif poseUseKey then
+            Vanity.usePose(poseUseKey, false)
+        elseif tposeUseKey then
+            Vanity.usePose(tposeUseKey, true)
+        elseif poseClear then
+            Vanity.clearPose()
+        elseif poseDelKey then
+            Vanity.deletePose(poseDelKey)
+        elseif poseSync then
+            Vanity.syncPose()
+        elseif addonSet then
+            Vanity.setAddon(addonSet)
+        elseif addonToggle then
+            Vanity.toggleAddon()
+        elseif addonClear then
+            Vanity.clearAddon()
+        elseif elemUpdateType then
             Vanity.updateElement(elemUpdateType, elemUpdateText)
-        elseif elemList then
-            Vanity.listElements()
         elseif elemCombineAll then
             local combKey, combName = string.match(elemCombineAll, "^(%w+)%s+\"([^\"]+)\"$")
             Vanity.combineElements(combKey, combName)
@@ -546,11 +805,14 @@ end
 -- =========================================================================
 function Vanity.init()
     if Vanity.aliasHandler then killAlias(Vanity.aliasHandler) end
+    if Vanity.roomHandler then killAnonymousEventHandler(Vanity.roomHandler) end
     
     Vanity.aliasHandler = tempAlias("^vanity(?: (.*))?$", [[
         local args = matches[2] or ""
         Vanity.handleCommand(args)
     ]])
+    
+    Vanity.roomHandler = registerAnonymousEventHandler("gmcp.Room.Info", "Vanity.onRoomMove")
 
     Vanity.load()
     Vanity.echo("Manager Initialized. Type " .. Vanity.config.colors.highlight .. "vanity<reset> to view your dashboard.")
