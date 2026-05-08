@@ -18,6 +18,11 @@ Unlike older systems, Vanity has zero external dependencies, relies purely on si
 
 ---
 
+## Screenshot
+<img width="1064" height="772" alt="image" src="https://github.com/user-attachments/assets/d5df2b35-30b8-4832-b6e5-b2b5829ebd9f" />
+
+---
+
 ## Installation
 
 1. Download the `Vanity.mpackage` or import the `Vanity-Core.lua` script directly into your Mudlet Script Editor.
