@@ -1,4 +1,4 @@
-Vanity: Modular Character Description Manager (v1.0.0)
+Vanity: Modular Character Description Manager (v1.1.0)
 
 A centralized, zero-dependency script interface for Mudlet to easily swap and build character descriptions in Achaea.
 Vanity cleanly organizes your saved descriptions, modular elements (hair, eyes, build), and poses into an easy-to-use in-client dashboard.
