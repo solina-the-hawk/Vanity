@@ -34,6 +34,10 @@ Vanity.addon = Vanity.addon or { text = "", enabled = false }
 Vanity.poses = Vanity.poses or {}
 Vanity.currentPose = Vanity.currentPose or { type = "None", text = "Not set" }
 Vanity.lastRoom = Vanity.lastRoom or 0
+Vanity.config.mode = Vanity.config.mode or "standard" -- Can be "standard" or "complex"
+Vanity.phrases = Vanity.phrases or {}
+Vanity.activeSlots = Vanity.activeSlots or {} -- An ordered array holding phrase keywords
+Vanity.slotBindings = Vanity.slotBindings or {} -- A table mapping slot indices to phrase keys
 
 -- =========================================================================
 -- Standardized Output Helper
@@ -53,11 +57,15 @@ function Vanity.save()
     end
     
     local data = {
+        config_mode = Vanity.config.mode, -- Save mode state
         descriptions = Vanity.descriptions,
         elements = Vanity.elements,
         addon = Vanity.addon,
         poses = Vanity.poses,
-        currentPose = Vanity.currentPose
+        currentPose = Vanity.currentPose,
+        phrases = Vanity.phrases,
+        activeSlots = Vanity.activeSlots,
+        slotBindings = Vanity.slotBindings
     }
     
     local filepath = baseDir .. "/Vanity_Data.lua"
@@ -71,12 +79,25 @@ function Vanity.load()
     if io.exists(newFile) then
         local data = {}
         table.load(newFile, data)
+        Vanity.config.mode = data.config_mode or "standard"
+        Vanity.phrases = data.phrases or {}
+        Vanity.activeSlots = data.activeSlots or {}
+        Vanity.slotBindings = data.slotBindings or {}
         Vanity.descriptions = data.descriptions or {}
         Vanity.elements = data.elements or data.components or {} 
         Vanity.addon = data.addon or { text = "", enabled = false }
         Vanity.poses = data.poses or {}
         Vanity.currentPose = data.currentPose or { type = "None", text = "Not set" }
         
+        local phrasesMigrated = false
+        for k, v in pairs(Vanity.phrases) do
+            if type(v) == "string" then
+                Vanity.phrases[k] = { category = "general", text = v }
+                phrasesMigrated = true
+            end
+        end
+        if phrasesMigrated then Vanity.save() end
+
         local migrated = false
         for k, v in pairs(Vanity.descriptions) do
             if type(v) == "string" then
@@ -91,6 +112,204 @@ function Vanity.load()
             Vanity.save() 
             Vanity.echo("Migrated older descriptions to the new Keyword/Name format.")
         end
+    end
+end
+
+-- =========================================================================
+-- Complex Mode: Phrases & Slots
+-- =========================================================================
+
+function Vanity.setMode(mode)
+    local c = Vanity.config.colors
+    mode = mode:lower()
+    if mode == "standard" or mode == "complex" then
+        Vanity.config.mode = mode
+        Vanity.save()
+        Vanity.echo(string.format("%sVanity is now operating in %s%s%s mode.<reset>", c.text, c.highlight, mode:upper(), c.text))
+    else
+        Vanity.echo(string.format("%sInvalid mode. Please use 'standard' or 'complex'.<reset>", c.error))
+    end
+end
+
+function Vanity.addPhrase(category, keyword, text)
+    keyword = keyword:lower()
+    category = category:lower()
+    local c = Vanity.config.colors
+    
+    Vanity.phrases[keyword] = { category = category, text = text }
+    Vanity.save()
+    Vanity.echo(string.format("%sPhrase [%s%s%s] saved under category '%s%s%s'.<reset>", c.text, c.highlight, keyword, c.text, c.highlight, category, c.text))
+end
+
+function Vanity.setSlot(slotNum, keyword)
+    slotNum = tonumber(slotNum)
+    keyword = keyword:lower()
+    local c = Vanity.config.colors
+    
+    if not Vanity.phrases[keyword] then
+        Vanity.echo(string.format("%sPhrase keyword '%s' not found! Use %svanity phrase list%s to see available phrases.<reset>", c.error, keyword, c.highlight, c.error))
+        return
+    end
+
+    -- Enforce category binding if one exists for this slot
+    local requiredCategory = Vanity.slotBindings[slotNum]
+    local phraseCategory = Vanity.phrases[keyword].category
+    if requiredCategory and requiredCategory ~= phraseCategory then
+        Vanity.echo(string.format("%sCannot assign! Slot %s%d%s is bound to category '%s%s%s', but '%s' is in category '%s'.<reset>", 
+            c.error, c.highlight, slotNum, c.error, c.highlight, requiredCategory, c.error, keyword, phraseCategory))
+        return
+    end
+    
+    Vanity.activeSlots[slotNum] = keyword
+    Vanity.save()
+    Vanity.echo(string.format("%sSlot %s%d%s set to phrase [%s%s%s].<reset>", c.text, c.highlight, slotNum, c.text, c.highlight, keyword, c.text))
+    
+    if Vanity.config.mode == "complex" then
+        Vanity.previewComplexDescription()
+    end
+end
+
+function Vanity.buildComplexDescription()
+    local parts = {}
+    local maxSlot = 0
+    for k, _ in pairs(Vanity.activeSlots) do
+        if k > maxSlot then maxSlot = k end
+    end
+    
+    for i = 1, maxSlot do
+        local phraseKey = Vanity.activeSlots[i]
+        if phraseKey and Vanity.phrases[phraseKey] then
+            -- Extract the text from the new table structure
+            table.insert(parts, Vanity.phrases[phraseKey].text)
+        end
+    end
+    
+    return table.concat(parts, " ")
+end
+
+function Vanity.previewComplexDescription()
+    local c = Vanity.config.colors
+    local combined = Vanity.buildComplexDescription()
+    
+    if combined == "" then
+        Vanity.echo(string.format("%sYour complex description is currently empty. Assign phrases to slots first!<reset>", c.error))
+        return
+    end
+    
+    Vanity.echo(string.format("%sCurrent Complex Description Preview:<reset>", c.highlight))
+    cecho(string.format("%s%s<reset>\n", c.text, combined))
+    Vanity.checkStyle(combined) -- Reuse your existing style checker
+end
+
+function Vanity.useComplexDescription()
+    local c = Vanity.config.colors
+    if Vanity.config.mode ~= "complex" then
+        Vanity.echo(string.format("%sYou are not in complex mode! Type %svanity mode complex%s to switch.<reset>", c.error, c.highlight, c.error))
+        return
+    end
+    
+    local finalContent = Vanity.buildComplexDescription()
+    
+    if finalContent == "" then
+        Vanity.echo(string.format("%sCannot apply an empty description. Set some slots first!<reset>", c.error))
+        return
+    end
+    
+    -- Add-on logic reused from standard descriptions
+    if Vanity.addon.enabled and Vanity.addon.text ~= "" then
+        finalContent = finalContent .. " " .. Vanity.addon.text
+    end
+    
+    local length = finalContent:len()
+    local max = Vanity.config.limits.main
+    
+    if length > max then
+        Vanity.echo(string.format("%sERROR: Compiled description is %d chars. The Achaea limit is %d!<reset>", c.error, length, max))
+        return
+    elseif length > (max - 100) then
+        Vanity.echo(string.format("%sWARNING: Compiled description is %d chars. You are very close to the %d limit!<reset>", c.warning, length, max))
+    end
+    
+    Vanity.gagEcho()
+    send("DESCRIBE SELF " .. finalContent)
+    
+    local addonMsg = (Vanity.addon.enabled and Vanity.addon.text ~= "") and " (with add-on)" or ""
+    Vanity.echo(string.format("%sApplied compiled complex description%s.<reset>", c.text, addonMsg))
+end
+
+function Vanity.bindSlot(slotNum, category)
+    slotNum = tonumber(slotNum)
+    category = category:lower()
+    local c = Vanity.config.colors
+
+    Vanity.slotBindings[slotNum] = category
+    Vanity.save()
+    Vanity.echo(string.format("%sSlot %s%d%s is now strictly bound to the '%s%s%s' category.<reset>", c.text, c.highlight, slotNum, c.text, c.highlight, category, c.text))
+end
+
+function Vanity.unbindSlot(slotNum)
+    slotNum = tonumber(slotNum)
+    local c = Vanity.config.colors
+
+    if Vanity.slotBindings[slotNum] then
+        Vanity.slotBindings[slotNum] = nil
+        Vanity.save()
+        Vanity.echo(string.format("%sSlot %s%d%s is no longer bound to a specific category.<reset>", c.text, c.highlight, slotNum, c.text))
+    else
+        Vanity.echo(string.format("%sSlot %d is not currently bound to any category.<reset>", c.error, slotNum))
+    end
+end
+
+function Vanity.swapSlots(slotA, slotB)
+    slotA = tonumber(slotA)
+    slotB = tonumber(slotB)
+    local c = Vanity.config.colors
+
+    if slotA == slotB then
+        Vanity.echo(string.format("%sYou cannot move a slot to itself.<reset>", c.error))
+        return
+    end
+
+    local keyA = Vanity.activeSlots[slotA]
+    local keyB = Vanity.activeSlots[slotB]
+
+    -- If both are empty, do nothing
+    if not keyA and not keyB then
+        Vanity.echo(string.format("%sBoth Slot %d and Slot %d are empty.<reset>", c.warning, slotA, slotB))
+        return
+    end
+
+    -- Validate bindings before moving
+    if keyA then
+        local reqB = Vanity.slotBindings[slotB]
+        local catA = Vanity.phrases[keyA].category
+        if reqB and reqB ~= catA then
+            Vanity.echo(string.format("%sCannot move! Moving [%s] to Slot %d violates its binding to category '%s'.<reset>", 
+                c.error, keyA, slotB, reqB))
+            return
+        end
+    end
+
+    if keyB then
+        local reqA = Vanity.slotBindings[slotA]
+        local catB = Vanity.phrases[keyB].category
+        if reqA and reqA ~= catB then
+            Vanity.echo(string.format("%sCannot move! Moving [%s] to Slot %d violates its binding to category '%s'.<reset>", 
+                c.error, keyB, slotA, reqA))
+            return
+        end
+    end
+
+    -- Perform the swap/move
+    Vanity.activeSlots[slotA] = keyB
+    Vanity.activeSlots[slotB] = keyA
+    Vanity.save()
+
+    Vanity.echo(string.format("%sMoved/Swapped the contents of Slot %s%d%s and Slot %s%d%s.<reset>", 
+        c.text, c.highlight, slotA, c.text, c.highlight, slotB, c.text))
+
+    if Vanity.config.mode == "complex" then
+        Vanity.previewComplexDescription()
     end
 end
 
@@ -531,6 +750,42 @@ function Vanity.useDescription(keyword)
     end
 end
 
+function Vanity.listPhrases()
+    local c = Vanity.config.colors
+    cecho(string.format("\n%s=======================================================================<reset>", c.border))
+    cecho(string.format("\n%s                        V A N I T Y   P H R A S E S                    <reset>", c.border))
+    cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
+
+    local categorized = {}
+    local count = 0
+    
+    -- Group phrases by category
+    for keyword, data in pairs(Vanity.phrases) do
+        local cat = data.category or "general"
+        if not categorized[cat] then categorized[cat] = {} end
+        categorized[cat][keyword] = data.text
+        count = count + 1
+    end
+
+    if count == 0 then
+        cecho(string.format("\n  %sNo phrases saved yet. Use %svanity phrase add <cat> <key> <text>%s to create one.<reset>\n", c.text, c.highlight, c.text))
+    else
+        -- Print grouped by category
+        for cat, phrases in pairs(categorized) do
+            cecho(string.format("\n%s--[ %s%s%s ]---------------------------------------------------------------<reset>\n", c.border, c.highlight, cat:upper(), c.border))
+            for keyword, text in pairs(phrases) do
+                local preview = string.sub(text, 1, 55)
+                if string.len(text) > 55 then preview = preview .. "..." end
+                
+                cecho("  ")
+                cechoLink(string.format("%s[%s]<reset>", c.highlight, keyword), [[clearCmdLine() appendCmdLine("vanity slot 1 ]]..keyword..[[")]], "Click to prep assigning to a slot", true)
+                cecho(string.format(" %s: %s%s<reset>\n", c.prefix, c.text, preview))
+            end
+        end
+    end
+    cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
+end
+
 function Vanity.showDescription(keyword)
     keyword = keyword:lower()
     local c = Vanity.config.colors
@@ -596,7 +851,8 @@ function Vanity.listDescriptions()
     if count == 0 then
         cecho(string.format("\n%sNo descriptions saved yet. Use %svanity add <keyword> \"<Name>\" <desc>%s to create one.<reset>\n", c.text, c.highlight, c.text))
     end
-    cecho(string.format("%s=======================================================================<reset>\n", c.border))
+    -- Append the phrases list directly to the end of the descriptions list
+    Vanity.listPhrases()
 end
 
 -- =========================================================================
@@ -629,6 +885,34 @@ function Vanity.showDashboard()
         cecho(string.format("  %sNone set via Vanity.<reset>\n", c.text))
     else
         cecho(string.format("  %s[%-5s]%s %s<reset>\n", c.highlight, Vanity.currentPose.type, c.text, Vanity.currentPose.text))
+    end
+
+    cecho(string.format("\n%sCurrent Mode:<reset> %s%s<reset>\n", c.prefix, c.highlight, Vanity.config.mode:upper()))
+
+    if Vanity.config.mode == "complex" then
+        cecho(string.format("\n%sActive Phrase Slots (Complex Mode):<reset>\n", c.prefix))
+        local maxSlot = 0
+        for k, _ in pairs(Vanity.activeSlots) do
+            if k > maxSlot then maxSlot = k end
+        end
+
+        if maxSlot == 0 then
+            cecho(string.format("  %sNo phrases assigned to slots yet.<reset>\n", c.text))
+        else
+            for i = 1, maxSlot do
+                local phraseKey = Vanity.activeSlots[i]
+                local bindTag = Vanity.slotBindings[i] and string.format(" %s(%s)%s", c.warning, Vanity.slotBindings[i]:upper(), c.text) or ""
+                
+                if phraseKey and Vanity.phrases[phraseKey] then
+                    local phraseData = Vanity.phrases[phraseKey]
+                    local preview = string.sub(phraseData.text, 1, 40)
+                    if string.len(phraseData.text) > 40 then preview = preview .. "..." end
+                    cecho(string.format("  %s[Slot %d]%s%s %-10s : %s%s<reset>\n", c.highlight, i, c.text, bindTag, phraseKey, c.text, preview))
+                else
+                    cecho(string.format("  %s[Slot %d]%s%s <Empty><reset>\n", c.highlight, i, c.text, bindTag))
+                end
+            end
+        end
     end
 
     cecho(string.format("\n%sSaved Descriptions (Click Keyword to Activate):<reset>\n", c.prefix))
@@ -709,6 +993,16 @@ function Vanity.showHelp()
     cecho(string.format("\n  %svanity elem list<reset>                         - Shows your local saved elements.", c.highlight))
     cecho(string.format("\n  %svanity elem combine <keyword> \"<Name>\"<reset>   - Generates & saves a full desc.", c.highlight))
     
+    cecho(string.format("\n\n%sComplex Mode (Phrases):<reset>", c.prefix))
+    cecho(string.format("\n  %svanity mode <standard|complex><reset>           - Switches description mode.", c.highlight))
+    cecho(string.format("\n  %svanity phrase add <cat> <key> <text><reset>     - Saves a modular phrase.", c.highlight))
+    cecho(string.format("\n  %svanity phrase list<reset>                       - Lists all saved phrases.", c.highlight))
+    cecho(string.format("\n  %svanity slot <num> <key><reset>                  - Assigns a phrase to a slot.", c.highlight))
+    cecho(string.format("\n  %svanity slot bind <num> <cat><reset>              - Binds a category to a slot.", c.highlight))
+    cecho(string.format("\n  %svanity slot unbind <num><reset>                 - Unbinds a slot.", c.highlight))
+    cecho(string.format("\n  %svanity slot move <num1> <num2><reset>           - Moves/swaps phrases between slots.", c.highlight))
+    cecho(string.format("\n  %svanity apply<reset>                             - Applies your complex description.", c.highlight))
+
     cecho(string.format("\n\n%sUtility:<reset>", c.prefix))
     cecho(string.format("\n  %svanity debug<reset>                             - Toggles hiding of desc. update spam.", c.highlight))
 
@@ -736,7 +1030,10 @@ function Vanity.handleCommand(args)
         local poseClear = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Cc][Ll][Ee][Aa][Rr]$")
         local poseDelKey = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)$")
         local poseSync = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Ss][Yy][Nn][Cc]$")
-        
+        local slotSwapA, slotSwapB = string.match(args, "^[Ss][Ll][Oo][Tt]%s+[Mm][Oo][Vv][Ee]%s+(%d+)%s+(%d+)$")
+        if not slotSwapA then -- Accept 'swap' as well as 'move'
+            slotSwapA, slotSwapB = string.match(args, "^[Ss][Ll][Oo][Tt]%s+[Ss][Ww][Aa][Pp]%s+(%d+)%s+(%d+)$")
+        end
         local addKey, addName, addContent = string.match(args, "^[Aa][Dd][Dd]%s+(%w+)%s+\"([^\"]+)\"%s+(.+)$")
         local updKeyName, updName, updContentName = string.match(args, "^[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+\"([^\"]+)\"%s+(.+)$")
         local updKey, updContent = string.match(args, "^[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%w+)%s+(.+)$")
@@ -745,11 +1042,16 @@ function Vanity.handleCommand(args)
         local showKey = string.match(args, "^[Ss][Hh][Oo][Ww]%s+(%w+)$")
         local delKey, delConfirm = string.match(args, "^[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)%s*(.*)$")
         local editKey = string.match(args, "^[Ee][Dd][Ii][Tt]%s+(%w+)$")
-        
+        local modeSet = string.match(args, "^[Mm][Oo][Dd][Ee]%s+(%w+)$")
+        local phraseAddCat, phraseAddKey, phraseAddText = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Aa][Dd][Dd]%s+(%w+)%s+(%w+)%s+(.+)$")
+        local slotBindNum, slotBindCat = string.match(args, "^[Ss][Ll][Oo][Tt]%s+[Bb][Ii][Nn][Dd]%s+(%d+)%s+(%w+)$")
+        local slotUnbindNum = string.match(args, "^[Ss][Ll][Oo][Tt]%s+[Uu][Nn][Bb][Ii][Nn][Dd]%s+(%d+)$")
+        local slotNum, slotKey = string.match(args, "^[Ss][Ll][Oo][Tt]%s+(%d+)%s+(%w+)$") -- Existing
+        local applyComplex = string.match(args, "^[Aa][Pp][Pp][Ll][Yy]$")
         local addonSet = string.match(args, "^[Aa][Dd][Dd][Oo][Nn]%s+[Ss][Ee][Tt]%s+(.+)$")
         local addonToggle = string.match(args, "^[Aa][Dd][Dd][Oo][Nn]%s+[Tt][Oo][Gg][Gg][Ll][Ee]%s*$")
         local addonClear = string.match(args, "^[Aa][Dd][Dd][Oo][Nn]%s+[Cc][Ll][Ee][Aa][Rr]%s*$")
-
+        local phraseList = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Ll][Ii][Ss][Tt]$")
         local elemUpdateType, elemUpdateText = string.match(args, "^[Ee][Ll][Ee][Mm]%s+[Uu][Pp][Dd][Aa][Tt][Ee]%s+(%a+)%s*(.*)$")
         local elemCombineAll = string.match(args, "^[Ee][Ll][Ee][Mm]%s+[Cc][Oo][Mm][Bb][Ii][Nn][Ee]%s*(.*)$")
         
@@ -794,6 +1096,22 @@ function Vanity.handleCommand(args)
             Vanity.editDescription(editKey)
         elseif delKey then
             Vanity.deleteDescription(delKey, delConfirm)
+        elseif modeSet then
+            Vanity.setMode(modeSet)
+        elseif phraseAddCat then
+            Vanity.addPhrase(phraseAddCat, phraseAddKey, phraseAddText)
+        elseif slotNum then
+            Vanity.setSlot(slotNum, slotKey)
+        elseif applyComplex then
+            Vanity.useComplexDescription()
+        elseif phraseList then
+            Vanity.listPhrases()
+        elseif slotBindNum then
+            Vanity.bindSlot(slotBindNum, slotBindCat)
+        elseif slotUnbindNum then
+            Vanity.unbindSlot(slotUnbindNum)
+        elseif slotSwapA then
+            Vanity.swapSlots(slotSwapA, slotSwapB)
         else
             Vanity.echo(string.format("%sUnknown command or invalid syntax. Type %svanity help%s for options.<reset>", Vanity.config.colors.error, Vanity.config.colors.highlight, Vanity.config.colors.error))
         end
