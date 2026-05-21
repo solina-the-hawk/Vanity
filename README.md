@@ -1,7 +1,7 @@
 # Vanity
 **A streamlined, zero-dependency character description and pose manager for Achaea and Mudlet.**
 
-Vanity is a modern, lightweight system that removes the headache of managing character appearances and poses manually via aliases or clunky XML packages. It captures, stores, and organizes your various saved descriptions, modular elements, and stances into an easy-to-navigate dashboard. 
+Vanity is a modern, lightweight system that removes the headache of managing character appearances and poses manually via aliases or clunky XML packages. It captures, stores, and organizes your various saved descriptions, modular elements, phrases, and stances into an easy-to-navigate dashboard. 
 
 Unlike older systems, Vanity has zero external dependencies, relies purely on single-script architecture, and automatically gags server spam when swapping descriptions.
 
@@ -10,16 +10,18 @@ Unlike older systems, Vanity has zero external dependencies, relies purely on si
 ## Features
 
 * **Zero Bloat:** Single-script architecture. No reliance on legacy packages or bloated XML files.
+* **Complex Phrase Builder:** Switch to `complex` mode to build descriptions dynamically! Save reusable phrases into custom categories (like 'hair' or 'posture') and assign them to ordered slots. You can even lock specific slots to require certain categories, and effortlessly swap or move phrases between slots on the fly.
 * **Modular Elements:** Quickly set or update individual elements like `HEIGHT`, `EYES`, or `COMPLEXION`. Includes a 1-click `BALD` feature! You can even generate a combined description directly from your active elements.
 * **Smart Poses:** Save and swap between poses instantly. You can apply a standard `POSE`, or use a `TPOSE` (Temporary Pose) which automatically clears itself the moment you walk into a new room. 
 * **Dynamic Add-ons:** Have temporary gear, wounds, or a roleplay state you want added to the end of your description? Toggle an add-on string that automatically appends itself to whatever primary description you activate.
 * **Style Checker:** Vanity acts as a gentle editor, warning you if your description includes Godmoding, repeats your automatically-prepended race/gender, or describes clothing that the game already handles via your inventory.
-* **Dashboard Interface:** Type `vanity` in-game to see a clean, clickable UI of all your active elements, add-ons, and saved keywords. 
+* **Dashboard Interface:** Type `vanity` in-game to see a clean, clickable UI of all your active elements, add-ons, slots, and saved keywords. 
 
 ---
 
 ## Screenshot
 <img width="1064" height="772" alt="image" src="https://github.com/user-attachments/assets/d5df2b35-30b8-4832-b6e5-b2b5829ebd9f" />
+*(Note: Screenshot represents v1.0.0. The new v1.1.0 dashboard includes active slot tracking!)*
 
 ---
 
@@ -34,7 +36,7 @@ Unlike older systems, Vanity has zero external dependencies, relies purely on si
 
 ## Accessing Your Data
 
-Vanity stores your saved descriptions, poses, and active elements in a clean JSON/Lua format so they are preserved across sessions. 
+Vanity stores your saved descriptions, poses, phrases, and active elements in a clean JSON/Lua format so they are preserved across sessions. 
 
 To find your saved data file, look in your Mudlet Profile folder. If you're not sure where that is, open Mudlet's main input line and type:
 `lua getMudletHomeDir()`
