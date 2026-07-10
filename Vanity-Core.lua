@@ -997,6 +997,9 @@ end
 -- =========================================================================
 -- UI: Dashboard & Help Interface
 -- =========================================================================
+-- =========================================================================
+-- UI: Dashboard & Help Interface
+-- =========================================================================
 function Vanity.showDashboard()
     if Vanity.syncPosePosTrig then killTrigger(Vanity.syncPosePosTrig) end
     if Vanity.syncPoseNegTrig then killTrigger(Vanity.syncPoseNegTrig) end
@@ -1044,73 +1047,76 @@ function Vanity.drawDashboard()
     cecho(string.format("\n%s                     V A N I T Y   D A S H B O A R D                   <reset>", c.border))
     cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
     
-    cecho(string.format("\n%sCurrent Pose:<reset>\n", c.prefix))
+    -- === 1. Saved Feature Quick Links ===
+    cecho("\n  ")
+    local dCount = 0; for _ in pairs(Vanity.descriptions) do dCount = dCount + 1 end
+    local pCount = 0; for _ in pairs(Vanity.poses) do pCount = pCount + 1 end
+    local vCount = 0; for _ in pairs(Vanity.voices) do vCount = vCount + 1 end
+    local aCount = 0; for _ in pairs(Vanity.accents) do aCount = aCount + 1 end
+
+    cechoLink(string.format("%s[Saved Descriptions: %d]<reset> ", c.highlight, dCount), [[Vanity.listDescriptions()]], "View saved descriptions", true)
+    cechoLink(string.format("%s[Saved Poses: %d]<reset> ", c.highlight, pCount), [[clearCmdLine(); appendCmdLine("vanity pose ")]], "Prep pose command", true)
+    cechoLink(string.format("%s[Saved Voices: %d]<reset> ", c.highlight, vCount), [[clearCmdLine(); appendCmdLine("vanity voice ")]], "Prep voice command", true)
+    cechoLink(string.format("%s[Saved Accents: %d]<reset>\n", c.highlight, aCount), [[clearCmdLine(); appendCmdLine("vanity accent ")]], "Prep accent command", true)
+
+    -- === 2. Active Roleplay Indicators ===
+    -- Pose
+    cecho(string.format("\n%sPose:<reset>   ", c.prefix))
     if Vanity.currentPose.type == "None" then
-        cecho(string.format("  %sNone set.<reset>\n", c.text))
+        cecho(string.format("%sNone set.<reset>", c.text))
     else
-        cecho(string.format("  %s[%-6s]%s %s<reset>\n", c.highlight, Vanity.currentPose.type, c.text, Vanity.currentPose.text))
-        
+        cecho(string.format("%s[%-6s]%s %s<reset>", c.highlight, Vanity.currentPose.type, c.text, Vanity.currentPose.text))
         local isSaved = false
-        for k, v in pairs(Vanity.poses) do
-            if v == Vanity.currentPose.text then
-                isSaved = true
-                break
-            end
-        end
-        
+        for _, v in pairs(Vanity.poses) do if v == Vanity.currentPose.text then isSaved = true break end end
         if not isSaved then
             local safeText = Vanity.currentPose.text:gsub('"', '\\"')
-            local editCmd = string.format([[clearCmdLine() appendCmdLine("vanity pose add keyword %s")]], safeText)
-            cecho("    ")
-            cechoLink(string.format("%s[Save Pose?]<reset>\n", c.warning), editCmd, "Click to save this pose. Replace 'keyword' with your desired name.", true)
+            cecho(" ")
+            cechoLink(string.format("%s[Save?]<reset>", c.warning), string.format([[clearCmdLine() appendCmdLine("vanity pose add keyword %s")]], safeText), "Save this pose", true)
         end
     end
 
-    cecho(string.format("\n%sCurrent Voice:<reset>\n", c.prefix))
+    -- Voice
+    cecho(string.format("\n%sVoice:<reset>  ", c.prefix))
     if Vanity.currentVoice == "None" or Vanity.currentVoice == "" then
-        cecho(string.format("  %sNone set.<reset>\n", c.text))
+        cecho(string.format("%sNone set.<reset>", c.text))
     else
-        cecho(string.format("  %s[%-6s]%s %s<reset>\n", c.highlight, "VOICE", c.text, Vanity.currentVoice))
+        cecho(string.format("%s%s<reset>", c.text, Vanity.currentVoice))
         local isSaved = false
-        for k, v in pairs(Vanity.voices) do
-            if v == Vanity.currentVoice then isSaved = true break end
-        end
+        for _, v in pairs(Vanity.voices) do if v == Vanity.currentVoice then isSaved = true break end end
         if not isSaved then
             local safeText = Vanity.currentVoice:gsub('"', '\\"')
-            local editCmd = string.format([[clearCmdLine() appendCmdLine("vanity voice add keyword %s")]], safeText)
-            cecho("    ")
-            cechoLink(string.format("%s[Save Voice?]<reset>\n", c.warning), editCmd, "Click to save this voice. Replace 'keyword' with your desired name.", true)
+            cecho(" ")
+            cechoLink(string.format("%s[Save?]<reset>", c.warning), string.format([[clearCmdLine() appendCmdLine("vanity voice add keyword %s")]], safeText), "Save this voice", true)
         end
     end
 
-    cecho(string.format("\n%sCurrent Accent:<reset>\n", c.prefix))
+    -- Accent
+    cecho(string.format("\n%sAccent:<reset> ", c.prefix))
     if Vanity.currentAccent == "None" or Vanity.currentAccent == "" then
-        cecho(string.format("  %sNone set.<reset>\n", c.text))
+        cecho(string.format("%sNone set.<reset>\n", c.text))
     else
-        cecho(string.format("  %s[%-6s]%s %s<reset>\n", c.highlight, "ACCENT", c.text, Vanity.currentAccent))
+        cecho(string.format("%s%s<reset>", c.text, Vanity.currentAccent))
         local isSaved = false
-        for k, v in pairs(Vanity.accents) do
-            if v == Vanity.currentAccent then isSaved = true break end
-        end
+        for _, v in pairs(Vanity.accents) do if v == Vanity.currentAccent then isSaved = true break end end
         if not isSaved then
             local safeText = Vanity.currentAccent:gsub('"', '\\"')
-            local editCmd = string.format([[clearCmdLine() appendCmdLine("vanity accent add keyword %s")]], safeText)
-            cecho("    ")
-            cechoLink(string.format("%s[Save Accent?]<reset>\n", c.warning), editCmd, "Click to save this accent. Replace 'keyword' with your desired name.", true)
+            cecho(" ")
+            cechoLink(string.format("%s[Save?]<reset>\n", c.warning), string.format([[clearCmdLine() appendCmdLine("vanity accent add keyword %s")]], safeText), "Save this accent", true)
+        else
+            cecho("\n")
         end
     end
 
-    cecho(string.format("\n%sCurrent Mode:<reset> %s%s<reset>\n", c.prefix, c.highlight, Vanity.config.mode:upper()))
+    -- === 3. Active Description ===
+    local modeText = (Vanity.config.mode == "complex") and "Complex Mode" or "Simple Mode"
+    cecho(string.format("\n%sDescription (%s):<reset>\n", c.prefix, modeText))
 
     if Vanity.config.mode == "complex" then
-        cecho(string.format("\n%sActive Phrases (Complex Mode):<reset>\n", c.prefix))
         local maxSlot = 0
-        for k, _ in pairs(Vanity.activeSlots) do
-            if k > maxSlot then maxSlot = k end
-        end
+        for k, _ in pairs(Vanity.activeSlots) do if k > maxSlot then maxSlot = k end end
 
         if maxSlot == 0 then
-            cecho(string.format("  %sNo phrases assigned to slots yet.<reset>\n", c.text))
+            cecho(string.format("%sNo phrases assigned to slots yet.<reset>\n", c.text))
         else
             for i = 1, maxSlot do
                 local phraseKey = Vanity.activeSlots[i]
@@ -1118,97 +1124,39 @@ function Vanity.drawDashboard()
                 
                 if phraseKey and Vanity.phrases[phraseKey] then
                     local phraseData = Vanity.phrases[phraseKey]
-                    
                     cecho("  ")
                     local editCmd = string.format([[clearCmdLine() appendCmdLine("vanity phrase add %s %s %s")]], phraseData.subject, phraseData.variant, phraseData.text:gsub('"', '\\"'))
                     cechoLink(string.format("%s[Phrase %d]%s", c.highlight, i, c.text), editCmd, "Click to edit this phrase", true)
-                    
                     cecho(string.format("%s %-10s   %s%s<reset>\n", bindTag, phraseKey, c.text, phraseData.text))
                 else
-                    cecho(string.format("  %s[Phrase %d]%s%s <Empty><reset>\n", c.highlight, i, c.text, bindTag))
+                    cecho(string.format("%s[Phrase %d]%s%s <Empty><reset>\n", c.highlight, i, c.text, bindTag))
                 end
             end
         end
+    else
+        cecho(string.format("  %sYou are in Simple mode. Type %svanity list%s to see your saved descriptions.<reset>\n", c.text, c.highlight, c.text))
     end
 
-    cecho(string.format("\n%sCurrent Add-on:<reset>\n", c.prefix))
+    -- Add-On String (Inline)
+    cecho(string.format("\n%sCurrent Add-on:<reset> ", c.prefix))
     if Vanity.addon.text == "" then
-        cecho(string.format("  %sNone set.<reset>\n", c.text))
+        cecho(string.format("%sNone set.<reset>\n", c.text))
     else
         local status = Vanity.addon.enabled and "<green>[ON]<reset>" or "<red>[OFF]<reset>"
-        cecho(string.format("  %s %s%s<reset>\n", status, c.text, Vanity.addon.text))
+        cecho(string.format("%s %s%s<reset>\n", status, c.text, Vanity.addon.text))
     end
 
-    cecho(string.format("\n%sSaved Descriptions (Click Keyword to Activate):<reset>\n", c.prefix))
-    
-    local maxKeyLen = 10
-    for k, d in pairs(Vanity.descriptions) do
-        if #k > maxKeyLen then maxKeyLen = #k end
-    end
-    
-    local count = 0
-    for keyword, data in pairs(Vanity.descriptions) do
-        local keyPad = keyword .. string.rep(" ", maxKeyLen - #keyword)
-        
-        cecho("  ")
-        cechoLink(string.format("%s[%s]<reset>", c.highlight, keyPad), [[Vanity.useDescription("]]..keyword..[[")]], "Activate " .. data.name, true)
-        cecho(string.format(" %s%s<reset>\n", c.text, data.name))
-        count = count + 1
-    end
-    if count == 0 then
-        cecho(string.format("  %sNo descriptions saved yet.<reset>\n", c.text))
-    end
-    
-    cecho(string.format("\n%sSaved Poses (Click Keyword to Set as POSE):<reset>\n", c.prefix))
-    local pCount = 0
-    for pKey, pText in pairs(Vanity.poses) do
-        cecho("  ")
-        cechoLink(string.format("%s[%s]<reset>", c.highlight, pKey), [[Vanity.usePose("]]..pKey..[[", false)]], "Set as POSE", true)
-        cecho(string.format(" %s%s<reset>\n", c.text, pText))
-        pCount = pCount + 1
-    end
-    if pCount == 0 then
-        cecho(string.format("  %sNo poses saved yet.<reset>\n", c.text))
-    end
-
-    cecho(string.format("\n%sSaved Voices (Click Keyword to Set):<reset>\n", c.prefix))
-    local vCount = 0
-    for vKey, vText in pairs(Vanity.voices) do
-        cecho("  ")
-        cechoLink(string.format("%s[%s]<reset>", c.highlight, vKey), [[Vanity.useVocal("voice", "]]..vKey..[[")]], "Set as Voice", true)
-        cecho(string.format(" %s%s<reset>\n", c.text, vText))
-        vCount = vCount + 1
-    end
-    if vCount == 0 then
-        cecho(string.format("  %sNo voices saved yet.<reset>\n", c.text))
-    end
-
-    cecho(string.format("\n%sSaved Accents (Click Keyword to Set):<reset>\n", c.prefix))
-    local aCount = 0
-    for aKey, aText in pairs(Vanity.accents) do
-        cecho("  ")
-        cechoLink(string.format("%s[%s]<reset>", c.highlight, aKey), [[Vanity.useVocal("accent", "]]..aKey..[[")]], "Set as Accent", true)
-        cecho(string.format(" %s%s<reset>\n", c.text, aText))
-        aCount = aCount + 1
-    end
-    if aCount == 0 then
-        cecho(string.format("  %sNo accents saved yet.<reset>\n", c.text))
-    end
-
-    cecho(string.format("\n%sDescription Details:<reset>\n", c.prefix))
+    -- === 4. Detail Descriptions (Elements) ===
+    cecho(string.format("\n%sDescriptive Details:<reset>\n", c.prefix))
     local elems = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
     for _, k in ipairs(elems) do
         local val = Vanity.elements[k] or "Not set"
         local niceName = k:lower():gsub("^%l", string.upper)
-        cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, niceName, c.text, val))
+        cecho(string.format("%s%-15s<reset> : %s%s<reset>\n", c.highlight, niceName, c.text, val))
     end
     
-    cecho(string.format("\n%sQuick Syntax Guide:<reset>\n", c.prefix))
-    cecho(string.format("  %svanity use <keyword><reset>                  - Activate a saved description.\n", c.highlight))
-    cecho(string.format("  %svanity update <keyword> <text><reset>        - Updates text (keeps name).\n", c.highlight))
-    cecho(string.format("  %svanity addon toggle<reset>                   - Toggle your add-on text.\n", c.highlight))
-    cecho(string.format("  %svanity tpose/pose use <keyword><reset>       - Sets a saved pose permanently or temporarily.\n", c.highlight))
-    cecho(string.format("  %svanity help<reset>                           - View the full list of commands.\n", c.warning))
+    -- === 5. Footer ===
+    cecho(string.format("\nUse: %svanity help<reset> for help with command usage.\n", c.warning))
     cecho(string.format("%s=======================================================================<reset>\n", c.border))
 end
 
