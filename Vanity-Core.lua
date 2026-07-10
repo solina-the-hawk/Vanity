@@ -79,6 +79,9 @@ function Vanity.gagEcho()
     
     if Vanity.gagStartTrig then killTrigger(Vanity.gagStartTrig) end
     
+    -- Initialize our safety buffer
+    Vanity.gagBuffer = {}
+    
     Vanity.gagStartTrig = tempRegexTrigger("^(Your previous description was:|This is now how you appear:)", function()
         deleteLine()
         
@@ -90,24 +93,40 @@ function Vanity.gagEcho()
                 cecho("<red>[EATING]:<reset> " .. line .. "\n")
             end
             
-            deleteLine()
-            
+            -- Check for the anchor that signifies the end of the description block
             if string.find(line, "try LOOK ME.", 1, true) then
+                deleteLine()
                 killTrigger(Vanity.gagEaterTrig)
                 Vanity.gagEaterTrig = nil
+                Vanity.gagBuffer = {} -- Clear the buffer, we successfully gagged the spam!
                 if Vanity.config.debug then Vanity.echo("GAG STOPPED safely at LOOK ME anchor.") end
+            else
+                -- Buffer the line before deleting it, just in case it wasn't description spam
+                table.insert(Vanity.gagBuffer, line)
+                deleteLine()
             end
         end)
         
-        tempTimer(1.5, function() 
+        -- Lowered the timeout to 400ms to reduce the window of vulnerability
+        tempTimer(0.4, function() 
             if Vanity.gagEaterTrig then 
                 killTrigger(Vanity.gagEaterTrig) 
                 Vanity.gagEaterTrig = nil
-                if Vanity.config.debug then Vanity.echo("GAG FAILSAFE triggered (1.5s timeout expired).") end
+                
+                -- Failsafe: If the trigger expired without hitting the anchor, restore the text!
+                if #Vanity.gagBuffer > 0 then
+                    if Vanity.config.debug then Vanity.echo("GAG FAILSAFE: Restoring " .. #Vanity.gagBuffer .. " eaten lines.") end
+                    for _, bufferedLine in ipairs(Vanity.gagBuffer) do
+                        -- Echo it back to the screen exactly as it arrived
+                        echo(bufferedLine .. "\n")
+                    end
+                end
+                Vanity.gagBuffer = {}
             end 
         end)
     end)
     
+    -- Overall timeout waiting for the initial server response
     tempTimer(2, function() 
         if Vanity.gagStartTrig then 
             killTrigger(Vanity.gagStartTrig)
@@ -115,6 +134,25 @@ function Vanity.gagEcho()
             if Vanity.config.debug then Vanity.echo("Gag Start Trigger expired waiting for Achaea.") end
         end 
     end)
+end
+
+function Vanity.smartConcat(parts)
+    local processed = {}
+    
+    for _, part in ipairs(parts) do
+        -- Trim trailing whitespace just in case
+        local text = part:gsub("%s+$", "")
+        
+        if text ~= "" then
+            -- Check if it ends with standard terminal punctuation
+            if not text:match("[%.%?!]$") then
+                text = text .. "."
+            end
+            table.insert(processed, text)
+        end
+    end
+    
+    return table.concat(processed, " ")
 end
 
 function Vanity.onRoomMove()
@@ -154,8 +192,28 @@ function Vanity.save()
         slotBindings = Vanity.slotBindings
     }
     
-    local filepath = baseDir .. "/Vanity_Data.lua"
-    table.save(filepath, data)
+    local mainFile = baseDir .. "/Vanity_Data.lua"
+    local tempFile = baseDir .. "/Vanity_Data.tmp"
+    local backupFile = baseDir .. "/Vanity_Data.bak"
+    
+    -- 1. Write data to a temporary file first
+    table.save(tempFile, data)
+    
+    -- 2. Verify the temporary file exists before proceeding
+    if io.exists(tempFile) then
+        -- 3. If a previous save exists, back it up
+        if io.exists(mainFile) then
+            if io.exists(backupFile) then
+                os.remove(backupFile) -- Clear the old backup
+            end
+            os.rename(mainFile, backupFile)
+        end
+        
+        -- 4. Promote the temporary file to the main save file
+        os.rename(tempFile, mainFile)
+    else
+        Vanity.echo(string.format("%sERROR: Failed to save Vanity data to temporary file. Your data may not be saved!<reset>", Vanity.config.colors.error))
+    end
 end
 
 function Vanity.load()
@@ -167,7 +225,6 @@ function Vanity.load()
         table.load(newFile, data)
         
         Vanity.config.mode = data.config_mode or "standard"
-        Vanity.phrases = data.phrases or {}
         Vanity.activeSlots = data.activeSlots or {}
         Vanity.slotBindings = data.slotBindings or {}
         Vanity.descriptions = data.descriptions or {}
@@ -176,26 +233,69 @@ function Vanity.load()
         Vanity.poses = data.poses or {}
         Vanity.currentPose = data.currentPose or { type = "None", text = "Not set" }
         
+        -- ==========================================
+        -- Data Migration Logic (Phrases -> Subject:Variant)
+        -- ==========================================
+        local oldPhrases = data.phrases or {}
+        Vanity.phrases = {}
         local phrasesMigrated = false
-        for k, v in pairs(Vanity.phrases) do
+        
+        for oldKey, v in pairs(oldPhrases) do
             if type(v) == "string" then
-                Vanity.phrases[k] = { category = "general", text = v }
+                -- V1 Migration (Flat string)
+                Vanity.phrases["general:" .. oldKey] = { subject = "general", variant = oldKey, text = v }
                 phrasesMigrated = true
+            elseif v.category and not v.subject then
+                -- V2 Migration (Category-based to Subject/Variant)
+                local subj = v.category
+                local var = oldKey
+                
+                -- Check if user employed the 'hair-tousled' workaround
+                if string.find(oldKey, "%-") then
+                    subj = string.match(oldKey, "^([%w]+)%-") or subj
+                    var = string.match(oldKey, "%-([%w]+)$") or var
+                end
+                
+                local compKey = string.format("%s:%s", subj, var)
+                Vanity.phrases[compKey] = { subject = subj, variant = var, text = v.text }
+                phrasesMigrated = true
+            else
+                -- Already on V3 (Current format)
+                Vanity.phrases[oldKey] = v
             end
         end
-        if phrasesMigrated then Vanity.save() end
+        
+        -- Migrate active slots to use the new composite keys
+        for slotNum, slotKey in pairs(Vanity.activeSlots) do
+            if not string.find(slotKey, ":") then
+                -- Look for the matching phrase in the new database
+                for compKey, pData in pairs(Vanity.phrases) do
+                    if pData.variant == slotKey or (pData.subject .. "-" .. pData.variant) == slotKey then
+                        Vanity.activeSlots[slotNum] = compKey
+                        phrasesMigrated = true
+                        break
+                    end
+                end
+            end
+        end
 
-        local migrated = false
+        if phrasesMigrated then 
+            Vanity.save() 
+            Vanity.echo("Migrated older phrases to the new Subject:Variant format.")
+        end
+
+        -- Main Description Migration
+        local descMigrated = false
         for k, v in pairs(Vanity.descriptions) do
             if type(v) == "string" then
                 Vanity.descriptions[k] = {
                     name = k:gsub("^%l", string.upper), 
                     content = v
                 }
-                migrated = true
+                descMigrated = true
             end
         end
-        if migrated then 
+        if descMigrated then 
             Vanity.save() 
             Vanity.echo("Migrated older descriptions to the new Keyword/Name format.")
         end
@@ -402,37 +502,57 @@ function Vanity.setMode(mode)
     end
 end
 
-function Vanity.addPhrase(category, keyword, text)
-    keyword = keyword:lower()
-    category = category:lower()
+function Vanity.addPhrase(subject, variant, text)
+    subject = subject:lower():trim()
+    variant = variant:lower():trim()
     local c = Vanity.config.colors
     
-    Vanity.phrases[keyword] = { category = category, text = text }
+    -- Combine into our clean internal composite key
+    local compositeKey = string.format("%s:%s", subject, variant)
+    
+    Vanity.phrases[compositeKey] = { 
+        subject = subject, 
+        variant = variant, 
+        text = text 
+    }
+    
     Vanity.save()
-    Vanity.echo(string.format("%sPhrase [%s%s%s] saved under category '%s%s%s'.<reset>", c.text, c.highlight, keyword, c.text, c.highlight, category, c.text))
+    Vanity.echo(string.format("%sPhrase registered as %s%s:%s%s.<reset>", c.text, c.highlight, subject, variant, c.text))
 end
 
-function Vanity.setSlot(slotNum, keyword)
+function Vanity.setSlot(slotNum, inputKey)
     slotNum = tonumber(slotNum)
-    keyword = keyword:lower()
+    inputKey = inputKey:lower():trim()
     local c = Vanity.config.colors
-    
-    if not Vanity.phrases[keyword] then
-        Vanity.echo(string.format("%sPhrase keyword '%s' not found! Use %svanity phrase list%s to see available phrases.<reset>", c.error, keyword, c.highlight, c.error))
+    local targetKey = inputKey
+
+    -- 1. If the user didn't provide a colon, check for a Smart Lookup shortcut
+    if not string.find(inputKey, ":") then
+        local boundSubject = Vanity.slotBindings[slotNum]
+        if boundSubject and Vanity.phrases[string.format("%s:%s", boundSubject, inputKey)] then
+            targetKey = string.format("%s:%s", boundSubject, inputKey)
+        end
+    end
+
+    -- 2. Verify the phrase actually exists now
+    if not Vanity.phrases[targetKey] then
+        Vanity.echo(string.format("%sPhrase '%s' not found! Check your spelling or phrase list.<reset>", c.error, inputKey))
         return
     end
 
-    local requiredCategory = Vanity.slotBindings[slotNum]
-    local phraseCategory = Vanity.phrases[keyword].category
-    if requiredCategory and requiredCategory ~= phraseCategory then
-        Vanity.echo(string.format("%sCannot assign! Slot %s%d%s is bound to category '%s%s%s', but '%s' is in category '%s'.<reset>", 
-            c.error, c.highlight, slotNum, c.error, c.highlight, requiredCategory, c.error, keyword, phraseCategory))
+    local phraseData = Vanity.phrases[targetKey]
+    local requiredSubject = Vanity.slotBindings[slotNum]
+    
+    -- 3. Enforce slot bindings based on the subject
+    if requiredSubject and requiredSubject ~= phraseData.subject then
+        Vanity.echo(string.format("%sCannot assign! Slot %s%d%s is bound to subject '%s', but this phrase belongs to '%s'.<reset>", 
+            c.error, c.highlight, slotNum, c.error, requiredSubject, phraseData.subject))
         return
     end
     
-    Vanity.activeSlots[slotNum] = keyword
+    Vanity.activeSlots[slotNum] = targetKey
     Vanity.save()
-    Vanity.echo(string.format("%sSlot %s%d%s set to phrase [%s%s%s].<reset>", c.text, c.highlight, slotNum, c.text, c.highlight, keyword, c.text))
+    Vanity.echo(string.format("%sSlot %s%d%s set to phrase [%s%s%s].<reset>", c.text, c.highlight, slotNum, c.text, c.highlight, targetKey, c.text))
     
     if Vanity.config.mode == "complex" then
         Vanity.previewComplexDescription()
@@ -482,7 +602,8 @@ function Vanity.swapSlots(slotA, slotB)
 
     if keyA then
         local reqB = Vanity.slotBindings[slotB]
-        local catA = Vanity.phrases[keyA].category
+        -- Updated from .category to .subject
+        local catA = Vanity.phrases[keyA].subject
         if reqB and reqB ~= catA then
             Vanity.echo(string.format("%sCannot move! Moving [%s] to Slot %d violates its binding to category '%s'.<reset>", 
                 c.error, keyA, slotB, reqB))
@@ -492,7 +613,8 @@ function Vanity.swapSlots(slotA, slotB)
 
     if keyB then
         local reqA = Vanity.slotBindings[slotA]
-        local catB = Vanity.phrases[keyB].category
+        -- Updated from .category to .subject
+        local catB = Vanity.phrases[keyB].subject
         if reqA and reqA ~= catB then
             Vanity.echo(string.format("%sCannot move! Moving [%s] to Slot %d violates its binding to category '%s'.<reset>", 
                 c.error, keyB, slotA, reqA))
@@ -526,7 +648,8 @@ function Vanity.buildComplexDescription()
         end
     end
     
-    return table.concat(parts, " ")
+    -- Use the new smart concatenator here
+    return Vanity.smartConcat(parts)
 end
 
 function Vanity.previewComplexDescription()
@@ -587,25 +710,26 @@ function Vanity.listPhrases()
     local categorized = {}
     local count = 0
     
-    for keyword, data in pairs(Vanity.phrases) do
-        local cat = data.category or "general"
-        if not categorized[cat] then categorized[cat] = {} end
-        categorized[cat][keyword] = data.text
+    for compositeKey, data in pairs(Vanity.phrases) do
+        local sub = data.subject or "general"
+        if not categorized[sub] then categorized[sub] = {} end
+        categorized[sub][data.variant] = data.text
         count = count + 1
     end
 
     if count == 0 then
-        cecho(string.format("\n  %sNo phrases saved yet. Use %svanity phrase add <cat> <key> <text>%s to create one.<reset>\n", c.text, c.highlight, c.text))
+        cecho(string.format("\n  %sNo phrases saved yet. Use %svanity phrase add <subject> <variant> <text>%s to create one.<reset>\n", c.text, c.highlight, c.text))
     else
-        for cat, phrases in pairs(categorized) do
-            cecho(string.format("\n%s--[ %s%s%s ]---------------------------------------------------------------<reset>\n", c.border, c.highlight, cat:upper(), c.border))
-            for keyword, text in pairs(phrases) do
-                local preview = string.sub(text, 1, 55)
-                if string.len(text) > 55 then preview = preview .. "..." end
-                
+        for subject, variants in pairs(categorized) do
+            cecho(string.format("\n%s--[ %s%s%s ]---------------------------------------------------------------<reset>\n", c.border, c.highlight, subject:upper(), c.border))
+            for variant, text in pairs(variants) do
                 cecho("  ")
-                cechoLink(string.format("%s[%s]<reset>", c.highlight, keyword), [[clearCmdLine() appendCmdLine("vanity slot 1 ]]..keyword..[[")]], "Click to prep assigning to a slot", true)
-                cecho(string.format(" %s: %s%s<reset>\n", c.prefix, c.text, preview))
+                
+                local editCmd = string.format([[clearCmdLine() appendCmdLine("vanity phrase add %s %s %s")]], subject, variant, text:gsub('"', '\\"'))
+                cechoLink(string.format("%s[%s]<reset>", c.highlight, variant), editCmd, "Click to edit this phrase variant", true)
+                
+                -- Removed the colon separator, using spaces instead
+                cecho(string.format("   %s%s<reset>\n", c.text, text))
             end
         end
     end
@@ -694,39 +818,6 @@ function Vanity.deletePose(keyword)
     end
 end
 
-function Vanity.syncPose()
-    local c = Vanity.config.colors
-    
-    if Vanity.syncPosePosTrig then killTrigger(Vanity.syncPosePosTrig) end
-    if Vanity.syncPoseNegTrig then killTrigger(Vanity.syncPoseNegTrig) end
-    
-    Vanity.syncPosePosTrig = tempRegexTrigger("^You are (?:currently )?posing as: (.*)$", function()
-        deleteLine()
-        local text = matches[2]
-        
-        if Vanity.currentPose.type == "TPOSE" and Vanity.currentPose.text == text then
-        else
-            Vanity.currentPose = { type = "POSE", text = text }
-        end
-        Vanity.save()
-        Vanity.echo(string.format("%sPose synced with server: %s%s<reset>", c.text, c.highlight, text))
-    end, 1)
-    
-    Vanity.syncPoseNegTrig = tempRegexTrigger("^You are not (?:currently )?posing.*$", function()
-        deleteLine()
-        Vanity.currentPose = { type = "None", text = "Not set" }
-        Vanity.save()
-        Vanity.echo(string.format("%sPose synced with server: None active.<reset>", c.text))
-    end, 1)
-    
-    tempTimer(1, function()
-        if Vanity.syncPosePosTrig then killTrigger(Vanity.syncPosePosTrig) end
-        if Vanity.syncPoseNegTrig then killTrigger(Vanity.syncPoseNegTrig) end
-    end)
-    
-    send("SHOW POSE", false)
-end
-
 -- =========================================================================
 -- Element Features
 -- =========================================================================
@@ -789,7 +880,8 @@ function Vanity.combineElements(saveKey, saveName)
         end
     end
     
-    local combined = table.concat(parts, " ")
+    -- Use the new smart concatenator here
+    local combined = Vanity.smartConcat(parts)
     
     if combined == "" then
         Vanity.echo(string.format("%sYou have not set any elements to combine yet!<reset>", c.error))
@@ -844,38 +936,79 @@ end
 -- UI: Dashboard & Help Interface
 -- =========================================================================
 function Vanity.showDashboard()
+    if Vanity.syncPosePosTrig then killTrigger(Vanity.syncPosePosTrig) end
+    if Vanity.syncPoseNegTrig then killTrigger(Vanity.syncPoseNegTrig) end
+    
+    Vanity.syncPosePosTrig = tempRegexTrigger("^You are (?:currently )?posing as: (.*)$", function()
+        deleteLine()
+        local text = matches[2]
+        
+        if Vanity.currentPose.type == "TPOSE" and Vanity.currentPose.text == text then
+            -- Leave as TPOSE locally since SHOW POSE doesn't differentiate between temp and perm
+        else
+            Vanity.currentPose = { type = "POSE", text = text }
+        end
+        Vanity.save()
+        Vanity.drawDashboard()
+        
+        if Vanity.syncPoseNegTrig then killTrigger(Vanity.syncPoseNegTrig); Vanity.syncPoseNegTrig = nil end
+        if Vanity.syncPoseTimer then killTimer(Vanity.syncPoseTimer); Vanity.syncPoseTimer = nil end
+    end, 1)
+    
+    Vanity.syncPoseNegTrig = tempRegexTrigger("^You are not (?:currently )?posing.*$", function()
+        deleteLine()
+        Vanity.currentPose = { type = "None", text = "Not set" }
+        Vanity.save()
+        Vanity.drawDashboard()
+        
+        if Vanity.syncPosePosTrig then killTrigger(Vanity.syncPosePosTrig); Vanity.syncPosePosTrig = nil end
+        if Vanity.syncPoseTimer then killTimer(Vanity.syncPoseTimer); Vanity.syncPoseTimer = nil end
+    end, 1)
+    
+    -- Fallback timer: If Achaea lags or another script gags the output, draw cached dashboard after 1 second
+    Vanity.syncPoseTimer = tempTimer(1, function()
+        local timedOut = false
+        if Vanity.syncPosePosTrig then killTrigger(Vanity.syncPosePosTrig); Vanity.syncPosePosTrig = nil; timedOut = true end
+        if Vanity.syncPoseNegTrig then killTrigger(Vanity.syncPoseNegTrig); Vanity.syncPoseNegTrig = nil; timedOut = true end
+        if timedOut then Vanity.drawDashboard() end
+    end)
+    
+    send("SHOW POSE", false)
+end
+
+function Vanity.drawDashboard()
     local c = Vanity.config.colors
     cecho(string.format("\n%s=======================================================================<reset>", c.border))
     cecho(string.format("\n%s                     V A N I T Y   D A S H B O A R D                   <reset>", c.border))
     cecho(string.format("\n%s=======================================================================<reset>\n", c.border))
     
-    cecho(string.format("\n%sCurrent Elements:<reset>\n", c.prefix))
-    local elems = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
-    for _, k in ipairs(elems) do
-        local val = Vanity.elements[k] or "Not set"
-        local niceName = k:lower():gsub("^%l", string.upper)
-        cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, niceName, c.text, val))
-    end
-
-    cecho(string.format("\n%sCurrent Add-on:<reset>\n", c.prefix))
-    if Vanity.addon.text == "" then
-        cecho(string.format("  %sNone set.<reset>\n", c.text))
-    else
-        local status = Vanity.addon.enabled and "<green>[ON]<reset>" or "<red>[OFF]<reset>"
-        cecho(string.format("  %s %s%s<reset>\n", status, c.text, Vanity.addon.text))
-    end
-    
     cecho(string.format("\n%sCurrent Pose:<reset>\n", c.prefix))
     if Vanity.currentPose.type == "None" then
-        cecho(string.format("  %sNone set via Vanity.<reset>\n", c.text))
+        cecho(string.format("  %sNone set.<reset>\n", c.text))
     else
         cecho(string.format("  %s[%-5s]%s %s<reset>\n", c.highlight, Vanity.currentPose.type, c.text, Vanity.currentPose.text))
+        
+        -- Check if current pose exists in our saved lists
+        local isSaved = false
+        for k, v in pairs(Vanity.poses) do
+            if v == Vanity.currentPose.text then
+                isSaved = true
+                break
+            end
+        end
+        
+        if not isSaved then
+            local safeText = Vanity.currentPose.text:gsub('"', '\\"')
+            local editCmd = string.format([[clearCmdLine() appendCmdLine("vanity pose add keyword %s")]], safeText)
+            cecho("    ")
+            cechoLink(string.format("%s[Save Pose?]<reset>\n", c.warning), editCmd, "Click to save this pose. Replace 'keyword' with your desired name.", true)
+        end
     end
 
     cecho(string.format("\n%sCurrent Mode:<reset> %s%s<reset>\n", c.prefix, c.highlight, Vanity.config.mode:upper()))
 
     if Vanity.config.mode == "complex" then
-        cecho(string.format("\n%sActive Phrase Slots (Complex Mode):<reset>\n", c.prefix))
+        cecho(string.format("\n%sActive Phrases (Complex Mode):<reset>\n", c.prefix))
         local maxSlot = 0
         for k, _ in pairs(Vanity.activeSlots) do
             if k > maxSlot then maxSlot = k end
@@ -890,14 +1023,25 @@ function Vanity.showDashboard()
                 
                 if phraseKey and Vanity.phrases[phraseKey] then
                     local phraseData = Vanity.phrases[phraseKey]
-                    local preview = string.sub(phraseData.text, 1, 40)
-                    if string.len(phraseData.text) > 40 then preview = preview .. "..." end
-                    cecho(string.format("  %s[Slot %d]%s%s %-10s : %s%s<reset>\n", c.highlight, i, c.text, bindTag, phraseKey, c.text, preview))
+                    
+                    cecho("  ")
+                    local editCmd = string.format([[clearCmdLine() appendCmdLine("vanity phrase add %s %s %s")]], phraseData.subject, phraseData.variant, phraseData.text:gsub('"', '\\"'))
+                    cechoLink(string.format("%s[Phrase %d]%s", c.highlight, i, c.text), editCmd, "Click to edit this phrase", true)
+                    
+                    cecho(string.format("%s %-10s   %s%s<reset>\n", bindTag, phraseKey, c.text, phraseData.text))
                 else
-                    cecho(string.format("  %s[Slot %d]%s%s <Empty><reset>\n", c.highlight, i, c.text, bindTag))
+                    cecho(string.format("  %s[Phrase %d]%s%s <Empty><reset>\n", c.highlight, i, c.text, bindTag))
                 end
             end
         end
+    end
+
+    cecho(string.format("\n%sCurrent Add-on:<reset>\n", c.prefix))
+    if Vanity.addon.text == "" then
+        cecho(string.format("  %sNone set.<reset>\n", c.text))
+    else
+        local status = Vanity.addon.enabled and "<green>[ON]<reset>" or "<red>[OFF]<reset>"
+        cecho(string.format("  %s %s%s<reset>\n", status, c.text, Vanity.addon.text))
     end
 
     cecho(string.format("\n%sSaved Descriptions (Click Keyword to Activate):<reset>\n", c.prefix))
@@ -930,6 +1074,14 @@ function Vanity.showDashboard()
     end
     if pCount == 0 then
         cecho(string.format("  %sNo poses saved yet.<reset>\n", c.text))
+    end
+
+    cecho(string.format("\n%sDescription Details:<reset>\n", c.prefix))
+    local elems = {"HEIGHT", "BUILD", "COMPLEXION", "EYES", "HAIR"}
+    for _, k in ipairs(elems) do
+        local val = Vanity.elements[k] or "Not set"
+        local niceName = k:lower():gsub("^%l", string.upper)
+        cecho(string.format("  %s%-15s<reset> : %s%s<reset>\n", c.highlight, niceName, c.text, val))
     end
     
     cecho(string.format("\n%sQuick Syntax Guide:<reset>\n", c.prefix))
@@ -965,7 +1117,6 @@ function Vanity.showHelp()
     cecho(string.format("\n  %svanity tpose use <keyword><reset>               - Sets a saved pose temporarily.", c.highlight))
     cecho(string.format("\n  %svanity pose clear<reset>                        - Removes your active pose.", c.highlight))
     cecho(string.format("\n  %svanity pose delete <keyword><reset>             - Deletes a saved pose.", c.highlight))
-    cecho(string.format("\n  %svanity pose sync<reset>                         - Syncs dashboard pose with server.", c.highlight))
 
     cecho(string.format("\n\n%sAdd-on Strings:<reset>", c.prefix))
     cecho(string.format("\n  %svanity addon set <text><reset>                  - Sets and enables your add-on string.", c.highlight))
@@ -982,10 +1133,10 @@ function Vanity.showHelp()
     cecho(string.format("\n  %svanity mode <standard|complex><reset>           - Switches description mode.", c.highlight))
     cecho(string.format("\n  %svanity phrase add <cat> <key> <text><reset>     - Saves a modular phrase.", c.highlight))
     cecho(string.format("\n  %svanity phrase list<reset>                       - Lists all saved phrases.", c.highlight))
-    cecho(string.format("\n  %svanity slot <num> <key><reset>                  - Assigns a phrase to a slot.", c.highlight))
-    cecho(string.format("\n  %svanity slot bind <num> <cat><reset>             - Binds a category to a slot.", c.highlight))
-    cecho(string.format("\n  %svanity slot unbind <num><reset>                 - Unbinds a slot.", c.highlight))
-    cecho(string.format("\n  %svanity slot move <num1> <num2><reset>           - Moves/swaps phrases between slots.", c.highlight))
+    cecho(string.format("\n  %svanity phrase set <num> <key><reset>            - Assigns a phrase to a numeric position.", c.highlight))
+    cecho(string.format("\n  %svanity phrase bind <num> <cat><reset>           - Binds a category to a position.", c.highlight))
+    cecho(string.format("\n  %svanity phrase unbind <num><reset>               - Unbinds a position.", c.highlight))
+    cecho(string.format("\n  %svanity phrase move <num1> <num2><reset>         - Moves/swaps phrases between positions.", c.highlight))
     cecho(string.format("\n  %svanity apply<reset>                             - Applies your complex description.", c.highlight))
 
     cecho(string.format("\n\n%sUtility:<reset>", c.prefix))
@@ -1018,7 +1169,6 @@ function Vanity.handleCommand(args)
         local tposeUseKey = string.match(args, "^[Tt][Pp][Oo][Ss][Ee]%s+[Uu][Ss][Ee]%s+(%w+)$")
         local poseClear = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Cc][Ll][Ee][Aa][Rr]$")
         local poseDelKey = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)$")
-        local poseSync = string.match(args, "^[Pp][Oo][Ss][Ee]%s+[Ss][Yy][Nn][Cc]$")
         
         -- Add-ons
         local addonSet = string.match(args, "^[Aa][Dd][Dd][Oo][Nn]%s+[Ss][Ee][Tt]%s+(.+)$")
@@ -1039,18 +1189,34 @@ function Vanity.handleCommand(args)
         local delKey, delConfirm = string.match(args, "^[Dd][Ee][Ll][Ee][Tt][Ee]%s+(%w+)%s*(.*)$")
         local editKey = string.match(args, "^[Ee][Dd][Ii][Tt]%s+(%w+)$")
         
-        -- Complex Mode
+        -- Complex Mode (Phrases & Subjects/Variants)
         local modeSet = string.match(args, "^[Mm][Oo][Dd][Ee]%s+(%w+)$")
-        local phraseAddCat, phraseAddKey, phraseAddText = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Aa][Dd][Dd]%s+(%w+)%s+(%w+)%s+(.+)$")
+        -- vanity phrase add <subject> <variant> <text>
+        local phraseAddSubj, phraseAddVar, phraseAddText = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Aa][Dd][Dd]%s+([%w%-]+)%s+([%w%-]+)%s+(.+)$")
         local phraseList = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Ll][Ii][Ss][Tt]$")
-        local slotBindNum, slotBindCat = string.match(args, "^[Ss][Ll][Oo][Tt]%s+[Bb][Ii][Nn][Dd]%s+(%d+)%s+(%w+)$")
-        local slotUnbindNum = string.match(args, "^[Ss][Ll][Oo][Tt]%s+[Uu][Nn][Bb][Ii][Nn][Dd]%s+(%d+)$")
-        local slotNum, slotKey = string.match(args, "^[Ss][Ll][Oo][Tt]%s+(%d+)%s+(%w+)$")
-        local applyComplex = string.match(args, "^[Aa][Pp][Pp][Ll][Yy]$")
-        local slotSwapA, slotSwapB = string.match(args, "^[Ss][Ll][Oo][Tt]%s+[Mm][Oo][Vv][Ee]%s+(%d+)%s+(%d+)$")
-        if not slotSwapA then 
-            slotSwapA, slotSwapB = string.match(args, "^[Ss][Ll][Oo][Tt]%s+[Ss][Ww][Aa][Pp]%s+(%d+)%s+(%d+)$")
+        -- vanity phrase bind <num> <subject>
+        local phraseBindNum, phraseBindSubj = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Bb][Ii][Nn][Dd]%s+(%d+)%s+([%w%-]+)$")
+        -- vanity phrase unbind <num>
+        local phraseUnbindNum = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Uu][Nn][Bb][Ii][Nn][Dd]%s+(%d+)$")
+        -- vanity phrase set <num> <variant OR subject:variant>
+        local phraseSetNum, phraseSetKey = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Ss][Ee][Tt]%s+(%d+)%s+([%w%-:]+)$")
+        -- vanity phrase move/swap <num1> <num2>
+        local phraseSwapA, phraseSwapB = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Mm][Oo][Vv][Ee]%s+(%d+)%s+(%d+)$")
+        if not phraseSwapA then 
+            phraseSwapA, phraseSwapB = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Ss][Ww][Aa][Pp]%s+(%d+)%s+(%d+)$")
         end
+        local applyComplex = string.match(args, "^[Aa][Pp][Pp][Ll][Yy]$")
+        
+        -- Changed 'slot' to 'phrase' below:
+        local slotBindNum, slotBindCat = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Bb][Ii][Nn][Dd]%s+(%d+)%s+(%w+)$")
+        local slotUnbindNum = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Uu][Nn][Bb][Ii][Nn][Dd]%s+(%d+)$")
+        local slotNum, slotKey = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Ss][Ee][Tt]%s+(%d+)%s+(%w+)$")
+        local slotSwapA, slotSwapB = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Mm][Oo][Vv][Ee]%s+(%d+)%s+(%d+)$")
+        if not slotSwapA then 
+            slotSwapA, slotSwapB = string.match(args, "^[Pp][Hh][Rr][Aa][Ss][Ee]%s+[Ss][Ww][Aa][Pp]%s+(%d+)%s+(%d+)$")
+        end
+        
+        local applyComplex = string.match(args, "^[Aa][Pp][Pp][Ll][Yy]$")
 
         -- Route execution
         if poseAddKey then Vanity.addPose(poseAddKey, poseAddText)
@@ -1059,7 +1225,6 @@ function Vanity.handleCommand(args)
         elseif tposeUseKey then Vanity.usePose(tposeUseKey, true)
         elseif poseClear then Vanity.clearPose()
         elseif poseDelKey then Vanity.deletePose(poseDelKey)
-        elseif poseSync then Vanity.syncPose()
         
         elseif addonSet then Vanity.setAddon(addonSet)
         elseif addonToggle then Vanity.toggleAddon()
@@ -1079,13 +1244,14 @@ function Vanity.handleCommand(args)
         elseif editKey then Vanity.editDescription(editKey)
         elseif delKey then Vanity.deleteDescription(delKey, delConfirm)
             
+        -- Route execution (Complex Mode)
         elseif modeSet then Vanity.setMode(modeSet)
-        elseif phraseAddCat then Vanity.addPhrase(phraseAddCat, phraseAddKey, phraseAddText)
+        elseif phraseAddSubj then Vanity.addPhrase(phraseAddSubj, phraseAddVar, phraseAddText)
         elseif phraseList then Vanity.listPhrases()
-        elseif slotBindNum then Vanity.bindSlot(slotBindNum, slotBindCat)
-        elseif slotUnbindNum then Vanity.unbindSlot(slotUnbindNum)
-        elseif slotSwapA then Vanity.swapSlots(slotSwapA, slotSwapB)
-        elseif slotNum then Vanity.setSlot(slotNum, slotKey)
+        elseif phraseBindNum then Vanity.bindSlot(phraseBindNum, phraseBindSubj)
+        elseif phraseUnbindNum then Vanity.unbindSlot(phraseUnbindNum)
+        elseif phraseSwapA then Vanity.swapSlots(phraseSwapA, phraseSwapB)
+        elseif phraseSetNum then Vanity.setSlot(phraseSetNum, phraseSetKey)
         elseif applyComplex then Vanity.useComplexDescription()
         
         else
@@ -1099,6 +1265,8 @@ end
 -- =========================================================================
 function Vanity.init()
     if Vanity.aliasHandler then killAlias(Vanity.aliasHandler) end
+    if Vanity.poseAliasHandler then killAlias(Vanity.poseAliasHandler) end
+    if Vanity.unposeAliasHandler then killAlias(Vanity.unposeAliasHandler) end
     if Vanity.roomHandler then killAnonymousEventHandler(Vanity.roomHandler) end
     
     Vanity.aliasHandler = tempAlias("^vanity(?: (.*))?$", [[
@@ -1106,10 +1274,23 @@ function Vanity.init()
         Vanity.handleCommand(args)
     ]])
     
+    -- Intercept manual pose commands to keep our cache strictly in sync
+    Vanity.poseAliasHandler = tempAlias("^(?i)(t?pose)\\s+(.+)$", [[
+        local cmdType = matches[2]:upper()
+        local text = matches[3]
+        send(matches[1]) -- send exactly what they typed
+        Vanity.currentPose = { type = cmdType, text = text }
+        Vanity.save()
+    ]])
+    
+    Vanity.unposeAliasHandler = tempAlias("^(?i)unpose$", [[
+        send(matches[1])
+        Vanity.currentPose = { type = "None", text = "Not set" }
+        Vanity.save()
+    ]])
+    
     Vanity.roomHandler = registerAnonymousEventHandler("gmcp.Room.Info", "Vanity.onRoomMove")
 
     Vanity.load()
     Vanity.echo("Manager Initialized. Type " .. Vanity.config.colors.highlight .. "vanity<reset> to view your dashboard.")
 end
-
-Vanity.init()
