@@ -843,11 +843,15 @@ function Vanity.useVocal(vType, keyword)
     local text = targetTable[keyword]
     send("SET " .. vType:upper() .. " " .. text)
     
+    -- Mutually exclusive assignment
     if vType == "voice" then
         Vanity.currentVoice = text
+        Vanity.currentAccent = "None"
     else
         Vanity.currentAccent = text
+        Vanity.currentVoice = "None"
     end
+    
     Vanity.save()
     Vanity.echo(string.format("%sApplied %s [%s%s%s]: %s<reset>", c.text, vType:gsub("^%l", string.upper), c.highlight, keyword, c.text, text))
 end
@@ -857,11 +861,10 @@ function Vanity.clearVocal(vType)
     local c = Vanity.config.colors
     send("SET " .. vType:upper() .. " NONE")
     
-    if vType == "voice" then
-        Vanity.currentVoice = "None"
-    else
-        Vanity.currentAccent = "None"
-    end
+    -- Clearing one effectively clears both in Achaea
+    Vanity.currentVoice = "None"
+    Vanity.currentAccent = "None"
+    
     Vanity.save()
     Vanity.echo(string.format("%s%s cleared.<reset>", c.text, vType:gsub("^%l", string.upper)))
 end
@@ -1059,13 +1062,15 @@ function Vanity.drawDashboard()
     cechoLink(string.format("%s[Saved Voices: %d]<reset> ", c.highlight, vCount), [[clearCmdLine(); appendCmdLine("vanity voice ")]], "Prep voice command", true)
     cechoLink(string.format("%s[Saved Accents: %d]<reset>\n", c.highlight, aCount), [[clearCmdLine(); appendCmdLine("vanity accent ")]], "Prep accent command", true)
 
-    -- === 2. Active Roleplay Indicators ===
+    -- === 1. Active Roleplay Indicators (Inline) ===
+    cecho(string.format("\n%sCurrent Roleplay:<reset>\n", c.prefix))
+    
     -- Pose
-    cecho(string.format("\n%sPose:<reset>   ", c.prefix))
+    cecho(string.format("  %sPose:<reset>   ", c.prefix))
     if Vanity.currentPose.type == "None" then
-        cecho(string.format("%sNone set.<reset>", c.text))
+        cecho(string.format("%sNone<reset>   ", c.text))
     else
-        cecho(string.format("%s[%-6s]%s %s<reset>", c.highlight, Vanity.currentPose.type, c.text, Vanity.currentPose.text))
+        cecho(string.format("%s[%s]%s %s", c.highlight, Vanity.currentPose.type, c.text, Vanity.currentPose.text))
         local isSaved = false
         for _, v in pairs(Vanity.poses) do if v == Vanity.currentPose.text then isSaved = true break end end
         if not isSaved then
@@ -1073,14 +1078,15 @@ function Vanity.drawDashboard()
             cecho(" ")
             cechoLink(string.format("%s[Save?]<reset>", c.warning), string.format([[clearCmdLine() appendCmdLine("vanity pose add keyword %s")]], safeText), "Save this pose", true)
         end
+        cecho("   ")
     end
-
-    -- Voice
-    cecho(string.format("\n%sVoice:<reset>  ", c.prefix))
-    if Vanity.currentVoice == "None" or Vanity.currentVoice == "" then
-        cecho(string.format("%sNone set.<reset>", c.text))
-    else
-        cecho(string.format("%s%s<reset>", c.text, Vanity.currentVoice))
+    
+    -- Vocal (Voice or Accent)
+    cecho(string.format("%sVocal:<reset>  ", c.prefix))
+    if (Vanity.currentVoice == "None" or Vanity.currentVoice == "") and (Vanity.currentAccent == "None" or Vanity.currentAccent == "") then
+        cecho(string.format("%sNone<reset>\n", c.text))
+    elseif Vanity.currentVoice ~= "None" and Vanity.currentVoice ~= "" then
+        cecho(string.format("%s[VOICE]%s %s", c.highlight, c.text, Vanity.currentVoice))
         local isSaved = false
         for _, v in pairs(Vanity.voices) do if v == Vanity.currentVoice then isSaved = true break end end
         if not isSaved then
@@ -1088,23 +1094,17 @@ function Vanity.drawDashboard()
             cecho(" ")
             cechoLink(string.format("%s[Save?]<reset>", c.warning), string.format([[clearCmdLine() appendCmdLine("vanity voice add keyword %s")]], safeText), "Save this voice", true)
         end
-    end
-
-    -- Accent
-    cecho(string.format("\n%sAccent:<reset> ", c.prefix))
-    if Vanity.currentAccent == "None" or Vanity.currentAccent == "" then
-        cecho(string.format("%sNone set.<reset>\n", c.text))
+        cecho("\n")
     else
-        cecho(string.format("%s%s<reset>", c.text, Vanity.currentAccent))
+        cecho(string.format("%s[ACCENT]%s %s", c.highlight, c.text, Vanity.currentAccent))
         local isSaved = false
         for _, v in pairs(Vanity.accents) do if v == Vanity.currentAccent then isSaved = true break end end
         if not isSaved then
             local safeText = Vanity.currentAccent:gsub('"', '\\"')
             cecho(" ")
-            cechoLink(string.format("%s[Save?]<reset>\n", c.warning), string.format([[clearCmdLine() appendCmdLine("vanity accent add keyword %s")]], safeText), "Save this accent", true)
-        else
-            cecho("\n")
+            cechoLink(string.format("%s[Save?]<reset>", c.warning), string.format([[clearCmdLine() appendCmdLine("vanity accent add keyword %s")]], safeText), "Save this accent", true)
         end
+        cecho("\n")
     end
 
     -- === 3. Active Description ===
@@ -1370,8 +1370,10 @@ function Vanity.init()
         
         if vType == "voice" then
             Vanity.currentVoice = text
+            Vanity.currentAccent = "None"
         else
             Vanity.currentAccent = text
+            Vanity.currentVoice = "None"
         end
         Vanity.save()
     ]])
@@ -1382,8 +1384,10 @@ function Vanity.init()
         local vType = matches[3]:lower()
         if vType == "voice" then
             Vanity.currentVoice = text
+            Vanity.currentAccent = "None"
         else
             Vanity.currentAccent = text
+            Vanity.currentVoice = "None"
         end
         Vanity.save()
         if Vanity.config.debug then Vanity.echo("Server " .. vType .. " change intercepted.") end
@@ -1395,10 +1399,16 @@ function Vanity.init()
         local text = matches[3]
         text = text:gsub("%.$", "")
         
+        if text:lower() == "none" or text:lower() == "clear" then
+            text = "None"
+        end
+        
         if vType == "voice" then
             Vanity.currentVoice = text
+            Vanity.currentAccent = "None"
         else
             Vanity.currentAccent = text
+            Vanity.currentVoice = "None"
         end
         Vanity.save()
         if Vanity.config.debug then Vanity.echo("Server " .. vType .. " change intercepted.") end
